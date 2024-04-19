@@ -36,6 +36,47 @@ object EliminateView extends Rule[LogicalPlan] with CastSupport {
 }
 
 /**
+ * ViewBindingMode is used to specify the expected schema binding mode when we want to create or
+ * replace a view in [[CreateViewStatement]].
+ */
+sealed trait ViewSchemaMode {
+  override val toString: String = getClass.getSimpleName.stripSuffix("$")
+}
+
+/**
+ * SchemaBinding means the view only tolerates minimal changes to the underlying schema.
+ * It can tolerate extra columns in SELECT * and upcast to more generic types.
+ */
+object SchemaBinding extends ViewSchemaMode {
+  override val toString: String = "BINDING"
+}
+
+/**
+ * SchemaCompensation means the view only tolerates moderate changes to the underlying schema.
+ * It can tolerate extra columns in SELECT * and explicit casts between view body and view columns.
+ */
+object SchemaCompensation extends ViewSchemaMode {
+  override val toString: String = "COMPENSATION"
+}
+
+/**
+ * SchemaTypeEvolution means the view will adopt changed column types.
+ * In this mode the view will refresh its metastore data on reference to keep it up to day.
+ */
+object SchemaTypeEvolution extends ViewSchemaMode {
+  override val toString: String = "TYPE EVOLUTION"
+}
+
+/**
+ * SchemaEvolution means the view will adopt changed column types and number of columns.
+ * This is a result of not having a column list and WITH EVOLUTION.
+ * In this mode the view will refresh its metastore data on reference to keep it up to day.
+ */
+object SchemaEvolution extends ViewSchemaMode {
+  override val toString: String = "EVOLUTION"
+}
+
+/**
  * ViewType is used to specify the expected view type when we want to create or replace a view in
  * [[CreateViewStatement]].
  */

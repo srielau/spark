@@ -25,7 +25,7 @@ import org.json4s.jackson.JsonMethods._
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.{SQLConfHelper, TableIdentifier}
-import org.apache.spark.sql.catalyst.analysis.{AnalysisContext, GlobalTempView, LocalTempView, ViewType}
+import org.apache.spark.sql.catalyst.analysis.{AnalysisContext, GlobalTempView, LocalTempView, SchemaBinding, ViewSchemaMode, ViewType}
 import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable, CatalogTableType, TemporaryViewRelation}
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, SubqueryExpression, VariableReference}
 import org.apache.spark.sql.catalyst.plans.logical.{AnalysisOnlyCommand, CTEInChildren, CTERelationDef, LogicalPlan, Project, View, WithCTE}
@@ -56,6 +56,7 @@ import org.apache.spark.util.ArrayImplicits._
  * @param replace if true, and if the view already exists, updates it; if false, and if the view
  *                already exists, throws analysis exception.
  * @param viewType the expected view type to be created with this command.
+ * @param viewSchemaMode the tolerance of the view towards schema changes
  * @param isAnalyzed whether this command is analyzed or not.
  */
 case class CreateViewCommand(
@@ -68,6 +69,7 @@ case class CreateViewCommand(
     allowExisting: Boolean,
     replace: Boolean,
     viewType: ViewType,
+    viewSchemaMode: ViewSchemaMode = SchemaBinding,
     isAnalyzed: Boolean = false,
     referredTempFunctions: Seq[String] = Seq.empty)
   extends RunnableCommand with AnalysisOnlyCommand with CTEInChildren {
@@ -203,7 +205,7 @@ case class CreateViewCommand(
     val aliasedSchema = CharVarcharUtils.getRawSchema(
       aliasPlan(session, analyzedPlan).schema, session.sessionState.conf)
     val newProperties = generateViewProperties(
-      properties, session, analyzedPlan, aliasedSchema.fieldNames)
+      properties, session, analyzedPlan, aliasedSchema.fieldNames, viewSchemaMode)
 
     CatalogTable(
       identifier = name,
@@ -301,7 +303,7 @@ case class AlterViewAsCommand(
     CommandUtils.uncacheTableOrView(session, viewIdent)
 
     val newProperties = generateViewProperties(
-      viewMeta.properties, session, analyzedPlan, analyzedPlan.schema.fieldNames)
+      viewMeta.properties, session, analyzedPlan, analyzedPlan.schema.fieldNames, SchemaBinding)
 
     val newSchema = CharVarcharUtils.getRawSchema(analyzedPlan.schema)
     val updatedViewMeta = viewMeta.copy(
@@ -437,6 +439,16 @@ object ViewHelper extends SQLConfHelper with Logging {
   }
 
   /**
+   * Convert the viewSchemaMode to `properties`.
+   */
+  private def viewSchemaModeToProps(viewSchemaMode: ViewSchemaMode): Map[String, String] = {
+    val modeNameJson = JString(viewSchemaMode.toString)
+    val props = new mutable.HashMap[String, String]
+    props.put(VIEW_SCHEMA_MODE, compact(render(modeNameJson)))
+    props.toMap
+  }
+
+  /**
    * Convert the temporary object names to `properties`.
    */
   private def referredTempNamesToProps(
@@ -487,6 +499,7 @@ object ViewHelper extends SQLConfHelper with Logging {
       session: SparkSession,
       analyzedPlan: LogicalPlan,
       fieldNames: Array[String],
+      viewSchemaMode: ViewSchemaMode,
       tempViewNames: Seq[Seq[String]] = Seq.empty,
       tempFunctionNames: Seq[String] = Seq.empty,
       tempVariableNames: Seq[Seq[String]] = Seq.empty): Map[String, String] = {
@@ -506,7 +519,8 @@ object ViewHelper extends SQLConfHelper with Logging {
         manager.currentCatalog.name, manager.currentNamespace.toImmutableArraySeq) ++
       sqlConfigsToProps(conf) ++
       generateQueryColumnNames(queryOutput.toImmutableArraySeq) ++
-      referredTempNamesToProps(tempViewNames, tempFunctionNames, tempVariableNames)
+      referredTempNamesToProps(tempViewNames, tempFunctionNames, tempVariableNames) ++
+      viewSchemaModeToProps(viewSchemaMode)
   }
 
   /**
@@ -718,7 +732,7 @@ object ViewHelper extends SQLConfHelper with Logging {
     // TBLPROPERTIES is not allowed for temporary view, so we don't use it for
     // generating temporary view properties
     val newProperties = generateViewProperties(
-      Map.empty, session, analyzedPlan, viewSchema.fieldNames, tempViews,
+      Map.empty, session, analyzedPlan, viewSchema.fieldNames, SchemaBinding, tempViews,
       tempFunctions, tempVariables)
 
     CatalogTable(

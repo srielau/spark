@@ -36,7 +36,7 @@ import org.apache.spark.internal.{Logging, MDC}
 import org.apache.spark.internal.LogKey._
 import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.{CurrentUserContext, FunctionIdentifier, InternalRow, SQLConfHelper, TableIdentifier}
-import org.apache.spark.sql.catalyst.analysis.{MultiInstanceRelation, Resolver, UnresolvedLeafNode}
+import org.apache.spark.sql.catalyst.analysis.{MultiInstanceRelation, Resolver, SchemaBinding, SchemaCompensation, SchemaEvolution, SchemaTypeEvolution, UnresolvedLeafNode, ViewSchemaMode}
 import org.apache.spark.sql.catalyst.catalog.CatalogTable.VIEW_STORING_ANALYZED_PLAN
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeMap, AttributeReference, Cast, ExprId, Literal}
 import org.apache.spark.sql.catalyst.plans.logical._
@@ -50,7 +50,6 @@ import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.{CaseInsensitiveStringMap, SchemaUtils}
 import org.apache.spark.util.ArrayImplicits._
-
 
 /**
  * A function defined in the catalog.
@@ -402,6 +401,20 @@ case class CatalogTable(
   }
 
   /**
+   * Return the schema binding mode. Defaults to SchemaBinding if not a view or an older version.
+   */
+  def viewSchemaMode: ViewSchemaMode = {
+    val schemaMode = properties.getOrElse(VIEW_SCHEMA_MODE, SchemaBinding.toString)
+      .stripSuffix("\"").stripPrefix("\"")
+    schemaMode match {
+      case SchemaBinding.toString => SchemaBinding
+      case SchemaEvolution.toString => SchemaEvolution
+      case SchemaTypeEvolution.toString => SchemaTypeEvolution
+      case SchemaCompensation.toString => SchemaCompensation
+    }
+  }
+
+  /**
    * Return temporary view names the current view was referred. should be empty if the
    * CatalogTable is not a Temporary View or created by older versions of Spark(before 3.1.0).
    */
@@ -562,6 +575,8 @@ object CatalogTable {
   val VIEW_REFERRED_TEMP_VIEW_NAMES = VIEW_PREFIX + "referredTempViewNames"
   val VIEW_REFERRED_TEMP_FUNCTION_NAMES = VIEW_PREFIX + "referredTempFunctionsNames"
   val VIEW_REFERRED_TEMP_VARIABLE_NAMES = VIEW_PREFIX + "referredTempVariablesNames"
+
+  val VIEW_SCHEMA_MODE = VIEW_PREFIX + "schemaMode"
 
   val VIEW_STORING_ANALYZED_PLAN = VIEW_PREFIX + "storingAnalyzedPlan"
 

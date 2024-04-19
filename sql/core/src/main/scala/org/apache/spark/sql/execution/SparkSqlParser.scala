@@ -27,7 +27,7 @@ import org.antlr.v4.runtime.tree.TerminalNode
 
 import org.apache.spark.SparkException
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
-import org.apache.spark.sql.catalyst.analysis.{GlobalTempView, LocalTempView, PersistedView, UnresolvedFunctionName, UnresolvedIdentifier}
+import org.apache.spark.sql.catalyst.analysis.{GlobalTempView, LocalTempView, PersistedView, SchemaBinding, SchemaCompensation, SchemaEvolution, SchemaTypeEvolution, UnresolvedFunctionName, UnresolvedIdentifier}
 import org.apache.spark.sql.catalyst.catalog._
 import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
 import org.apache.spark.sql.catalyst.parser._
@@ -508,6 +508,7 @@ class SparkSqlAstBuilder extends AstBuilder {
     }
 
     checkDuplicateClauses(ctx.commentSpec(), "COMMENT", ctx)
+    checkDuplicateClauses(ctx.schemaBinding(), "WITH SCHEMA", ctx)
     checkDuplicateClauses(ctx.PARTITIONED, "PARTITIONED ON", ctx)
     checkDuplicateClauses(ctx.TBLPROPERTIES, "TBLPROPERTIES", ctx)
 
@@ -534,6 +535,20 @@ class SparkSqlAstBuilder extends AstBuilder {
     } else {
       LocalTempView
     }
+
+    val schemaBindingMode = ctx.schemaBinding(0)
+    val viewSchemaMode = if (schemaBindingMode == null) {
+      SchemaBinding
+    } else if (schemaBindingMode.COMPENSATION != null) {
+        SchemaCompensation
+    } else if (schemaBindingMode.EVOLUTION != null && userSpecifiedColumns.isEmpty) {
+      SchemaEvolution
+    } else if (schemaBindingMode.EVOLUTION != null) {
+      SchemaTypeEvolution
+    } else {
+      SchemaBinding
+    }
+
     val qPlan: LogicalPlan = plan(ctx.query)
 
     // Disallow parameter markers in the body of the view.
@@ -554,7 +569,8 @@ class SparkSqlAstBuilder extends AstBuilder {
         Some(originalText),
         qPlan,
         ctx.EXISTS != null,
-        ctx.REPLACE != null)
+        ctx.REPLACE != null,
+        viewSchemaMode)
     } else {
       // Disallows 'CREATE TEMPORARY VIEW IF NOT EXISTS' to be consistent with
       // 'CREATE TEMPORARY TABLE'
@@ -579,7 +595,8 @@ class SparkSqlAstBuilder extends AstBuilder {
           qPlan,
           ctx.EXISTS != null,
           ctx.REPLACE != null,
-          viewType = viewType)
+          viewType = viewType,
+          viewSchemaMode = viewSchemaMode)
       })
     }
   }

@@ -156,6 +156,7 @@ statement
         VIEW (IF NOT EXISTS)? identifierReference
         identifierCommentList?
         (commentSpec |
+         schemaBinding |
          (PARTITIONED ON identifierList) |
          (TBLPROPERTIES propertyList))*
         AS query                                                       #createView
@@ -340,6 +341,10 @@ skewSpec
 
 locationSpec
     : LOCATION stringLit
+    ;
+
+schemaBinding
+    : WITH SCHEMA (BINDING | COMPENSATION | EVOLUTION)
     ;
 
 commentSpec
@@ -1343,6 +1348,7 @@ ansiNonReserved
     | BIGINT
     | BINARY
     | BINARY_HEX
+    | BINDING
     | BOOLEAN
     | BUCKET
     | BUCKETS
@@ -1365,6 +1371,7 @@ ansiNonReserved
     | COMMIT
     | COMPACT
     | COMPACTIONS
+    | COMPENSATION
     | COMPUTE
     | CONCATENATE
     | COST
@@ -1643,6 +1650,7 @@ nonReserved
     | BIGINT
     | BINARY
     | BINARY_HEX
+    | BINDING
     | BOOLEAN
     | BOTH
     | BUCKET
@@ -1672,6 +1680,7 @@ nonReserved
     | COMMIT
     | COMPACT
     | COMPACTIONS
+    | COMPENSATION
     | COMPUTE
     | CONCATENATE
     | CONSTRAINT
