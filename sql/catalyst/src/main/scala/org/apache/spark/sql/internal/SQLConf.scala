@@ -4829,7 +4829,7 @@ object SQLConf {
     )
     .version("4.0.0")
     .booleanConf
-    .createWithDefault(false)
+    .createWithDefault(true)
 
   /**
    * Holds information about keys that have been deprecated.
