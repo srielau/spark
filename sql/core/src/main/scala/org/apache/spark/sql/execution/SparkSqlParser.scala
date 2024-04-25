@@ -27,7 +27,7 @@ import org.antlr.v4.runtime.tree.TerminalNode
 
 import org.apache.spark.SparkException
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
-import org.apache.spark.sql.catalyst.analysis.{GlobalTempView, LocalTempView, PersistedView, SchemaBinding, SchemaCompensation, SchemaEvolution, SchemaTypeEvolution, UnresolvedFunctionName, UnresolvedIdentifier}
+import org.apache.spark.sql.catalyst.analysis.{GlobalTempView, LocalTempView, PersistedView, SchemaEvolution, SchemaTypeEvolution, UnresolvedFunctionName, UnresolvedIdentifier}
 import org.apache.spark.sql.catalyst.catalog._
 import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
 import org.apache.spark.sql.catalyst.parser._
@@ -528,6 +528,10 @@ class SparkSqlAstBuilder extends AstBuilder {
       operationNotAllowed("TBLPROPERTIES can't coexist with CREATE TEMPORARY VIEW", ctx)
     }
 
+    if (ctx.TEMPORARY != null && ctx.schemaBinding(0) != null) {
+      operationNotAllowed("WITH SCHEMA can't coexist with CREATE TEMPORARY VIEW", ctx)
+    }
+
     val viewType = if (ctx.TEMPORARY == null) {
       PersistedView
     } else if (ctx.GLOBAL != null) {
@@ -536,17 +540,9 @@ class SparkSqlAstBuilder extends AstBuilder {
       LocalTempView
     }
 
-    val schemaBindingMode = ctx.schemaBinding(0)
-    val viewSchemaMode = if (schemaBindingMode == null) {
-      SchemaBinding
-    } else if (schemaBindingMode.COMPENSATION != null) {
-        SchemaCompensation
-    } else if (schemaBindingMode.EVOLUTION != null && userSpecifiedColumns.isEmpty) {
-      SchemaEvolution
-    } else if (schemaBindingMode.EVOLUTION != null) {
-      SchemaTypeEvolution
-    } else {
-      SchemaBinding
+    val viewSchemaMode = visitSchemaBinding(ctx.schemaBinding(0)) match {
+      case SchemaEvolution if (userSpecifiedColumns.nonEmpty) => SchemaTypeEvolution
+      case other => other
     }
 
     val qPlan: LogicalPlan = plan(ctx.query)

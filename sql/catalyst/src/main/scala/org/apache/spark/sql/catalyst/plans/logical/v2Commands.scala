@@ -1294,6 +1294,17 @@ case class AlterViewAs(
 }
 
 /**
+ * The logical plan of the ALTER VIEW ... AS command.
+ */
+case class AlterViewSchemaBinding(
+    child: LogicalPlan,
+    viewSchemaMode: ViewSchemaMode)
+  extends UnaryCommand {
+  override protected def withNewChildInternal(newChild: LogicalPlan): LogicalPlan =
+    copy(child = newChild)
+}
+
+/**
  * The logical plan of the CREATE VIEW ... command.
  */
 case class CreateView(

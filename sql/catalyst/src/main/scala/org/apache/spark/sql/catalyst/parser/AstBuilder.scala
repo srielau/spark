@@ -4956,6 +4956,34 @@ class AstBuilder extends DataTypeAstBuilder with SQLConfHelper with Logging {
       query = plan(ctx.query))
   }
 
+  override def visitSchemaBinding(ctx: SchemaBindingContext): ViewSchemaMode = {
+    if (ctx == null)
+    {
+      SchemaBinding
+    } else if (ctx.COMPENSATION != null) {
+      SchemaCompensation
+    } else if (ctx.EVOLUTION != null) {
+      SchemaTypeEvolution
+    } else {
+      SchemaBinding
+    }
+  }
+
+  /**
+   * Alter the schema binding of a view. This creates a [[AlterViewSchemaBinding]]
+   *
+   * For example:
+   * {{{
+   *   ALTER VIEW multi_part_name WITH SCHEMA ...;
+   * }}}
+   */
+  override def visitAlterViewSchemaBinding(ctx: AlterViewSchemaBindingContext): LogicalPlan
+  = withOrigin(ctx) {
+    AlterViewSchemaBinding(
+      createUnresolvedView(ctx.identifierReference, "ALTER VIEW ... WITH SCHEMA ..."),
+      viewSchemaMode = visitSchemaBinding(ctx.schemaBinding))
+  }
+
   /**
    * Create a [[RenameTable]] command.
    *
