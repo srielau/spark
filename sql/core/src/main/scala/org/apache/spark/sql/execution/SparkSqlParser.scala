@@ -541,7 +541,7 @@ class SparkSqlAstBuilder extends AstBuilder {
     }
 
     val viewSchemaMode = visitSchemaBinding(ctx.schemaBinding(0)) match {
-      case SchemaEvolution if (userSpecifiedColumns.nonEmpty) => SchemaTypeEvolution
+      case SchemaEvolution if userSpecifiedColumns.nonEmpty => SchemaTypeEvolution
       case other => other
     }
 

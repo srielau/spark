@@ -4963,7 +4963,7 @@ class AstBuilder extends DataTypeAstBuilder with SQLConfHelper with Logging {
     } else if (ctx.COMPENSATION != null) {
       SchemaCompensation
     } else if (ctx.EVOLUTION != null) {
-      SchemaTypeEvolution
+      SchemaEvolution
     } else {
       SchemaBinding
     }

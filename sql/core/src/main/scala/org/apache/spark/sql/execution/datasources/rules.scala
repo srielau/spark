@@ -30,6 +30,7 @@ import org.apache.spark.sql.catalyst.util.TypeUtils._
 import org.apache.spark.sql.connector.expressions.{FieldReference, RewritableTransform}
 import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.execution.command.DDLUtils
+import org.apache.spark.sql.execution.command.ViewHelper.generateViewProperties
 import org.apache.spark.sql.execution.datasources.{CreateTable => CreateTableV1}
 import org.apache.spark.sql.execution.datasources.v2.FileDataSourceV2
 import org.apache.spark.sql.internal.SQLConf
@@ -619,4 +620,50 @@ object CollationCheck extends (LogicalPlan => Unit) {
 
   private def isCollationExpression(expression: Expression): Boolean =
     expression.isInstanceOf[Collation] || expression.isInstanceOf[Collate]
+}
+
+
+/**
+ * This rule checks for views WITH SCHEMA EVOLUTION and synchronizes the catalog if evolution was
+ * detected
+ */
+object SyncViewsCheck extends (LogicalPlan => Unit) {
+    def apply(plan: LogicalPlan): Unit = {
+    plan.foreach {
+      node =>
+        node match {
+          case View(metaData, isTempView, viewQuery) =>
+            val viewSchemaMode = metaData.viewSchemaMode
+            if (viewSchemaMode == SchemaTypeEvolution || viewSchemaMode == SchemaEvolution) {
+              val viewFields = metaData.schema.fields
+              val planFields = plan.output
+              val session = SparkSession.getActiveSession.get
+              val redoSignature =
+                viewSchemaMode == SchemaEvolution && viewFields.length != planFields.length
+              val newProperties = if (redoSignature) {
+                generateViewProperties(
+                  metaData.properties,
+                  session,
+                  viewQuery.schema.fieldNames,
+                  viewQuery.schema.fieldNames,
+                  metaData.viewSchemaMode)
+              } else {
+                metaData.properties
+              }
+
+              val redoTypes = viewFields.zipWithIndex.exists { case (field, index) =>
+                 (field.dataType != planFields(index).dataType)
+              }
+
+              if (redoSignature || redoTypes) {
+                val updatedViewMeta = metaData.copy(
+                  properties = newProperties,
+                  schema = viewQuery.schema)
+                session.sessionState.catalog.alterTable(updatedViewMeta)
+              }
+            }
+          case _ => // OK
+        }
+    }
+  }
 }
