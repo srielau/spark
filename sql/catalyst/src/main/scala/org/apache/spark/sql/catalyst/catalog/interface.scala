@@ -504,6 +504,7 @@ case class CatalogTable(
     if (tableType == CatalogTableType.VIEW) {
       viewText.foreach(map.put("View Text", _))
       viewOriginalText.foreach(map.put("View Original Text", _))
+      map.put("View Schema Mode", viewSchemaMode.toString)
       if (viewCatalogAndNamespace.nonEmpty) {
         import org.apache.spark.sql.connector.catalog.CatalogV2Implicits._
         map.put("View Catalog and Namespace", viewCatalogAndNamespace.quoted)

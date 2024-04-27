@@ -4959,9 +4959,16 @@ class AstBuilder extends DataTypeAstBuilder with SQLConfHelper with Logging {
   override def visitSchemaBinding(ctx: SchemaBindingContext): ViewSchemaMode = {
     if (ctx == null)
     {
-      SchemaBinding
+      conf.viewSchemaBinding match {
+        case SchemaBinding.toString => SchemaBinding
+        case SchemaEvolution.toString => SchemaEvolution
+        case SchemaCompensation.toString => SchemaCompensation
+        case SchemaTypeEvolution.toString => SchemaTypeEvolution
+      }
     } else if (ctx.COMPENSATION != null) {
       SchemaCompensation
+    } else if (ctx.TYPE != null) {
+      SchemaTypeEvolution
     } else if (ctx.EVOLUTION != null) {
       SchemaEvolution
     } else {

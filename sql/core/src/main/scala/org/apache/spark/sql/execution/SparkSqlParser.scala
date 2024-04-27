@@ -27,7 +27,7 @@ import org.antlr.v4.runtime.tree.TerminalNode
 
 import org.apache.spark.SparkException
 import org.apache.spark.sql.catalyst.{FunctionIdentifier, TableIdentifier}
-import org.apache.spark.sql.catalyst.analysis.{GlobalTempView, LocalTempView, PersistedView, SchemaEvolution, SchemaTypeEvolution, UnresolvedFunctionName, UnresolvedIdentifier}
+import org.apache.spark.sql.catalyst.analysis.{GlobalTempView, LocalTempView, PersistedView, UnresolvedFunctionName, UnresolvedIdentifier}
 import org.apache.spark.sql.catalyst.catalog._
 import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
 import org.apache.spark.sql.catalyst.parser._
@@ -540,10 +540,7 @@ class SparkSqlAstBuilder extends AstBuilder {
       LocalTempView
     }
 
-    val viewSchemaMode = visitSchemaBinding(ctx.schemaBinding(0)) match {
-      case SchemaEvolution if userSpecifiedColumns.nonEmpty => SchemaTypeEvolution
-      case other => other
-    }
+    val viewSchemaMode = visitSchemaBinding(ctx.schemaBinding(0))
 
     val qPlan: LogicalPlan = plan(ctx.query)
 

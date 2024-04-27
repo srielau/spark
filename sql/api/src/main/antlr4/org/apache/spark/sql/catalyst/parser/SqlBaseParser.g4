@@ -345,7 +345,7 @@ locationSpec
     ;
 
 schemaBinding
-    : WITH SCHEMA (BINDING | COMPENSATION | EVOLUTION)
+    : WITH SCHEMA (BINDING | COMPENSATION | EVOLUTION | TYPE EVOLUTION)
     ;
 
 commentSpec

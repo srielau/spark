@@ -1658,6 +1658,19 @@ object SQLConf {
     .booleanConf
     .createWithDefault(true)
 
+  val VIEW_SCHEMA_BINDING = buildConf("spark.sql.viewSchemaBinding")
+    .doc("Control the default behavior of views when the underlying schema changes. " +
+      "Valid values are: " +
+      "'BINDING': Safe casts only. " +
+      "'COMPENSATION': Any supported casts. " +
+      "'TYPE EVOLUTION': Adopt type changes." +
+      "'EVOLUTION': Adopt names, types and arity.")
+    .version("4.0.0")
+    .stringConf
+    .checkValues(Set("BINDING", "COMPENSATION", "TYPE EVOLUTION", "EVOLUTION"))
+    .createWithDefault("COMPENSATION")
+
+
   // The output committer class used by data sources. The specified class needs to be a
   // subclass of org.apache.hadoop.mapreduce.OutputCommitter.
   val OUTPUT_COMMITTER_CLASS = buildConf("spark.sql.sources.outputCommitterClass")
@@ -5391,6 +5404,8 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
   def groupByOrdinal: Boolean = getConf(GROUP_BY_ORDINAL)
 
   def groupByAliases: Boolean = getConf(GROUP_BY_ALIASES)
+
+  def viewSchemaBinding: String = getConf(VIEW_SCHEMA_BINDING)
 
   def defaultCacheStorageLevel: StorageLevel =
     StorageLevel.fromString(getConf(DEFAULT_CACHE_STORAGE_LEVEL))

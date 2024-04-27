@@ -25,7 +25,7 @@ import org.json4s.jackson.JsonMethods._
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.{SQLConfHelper, TableIdentifier}
-import org.apache.spark.sql.catalyst.analysis.{AnalysisContext, GlobalTempView, LocalTempView, SchemaBinding, SchemaEvolution, SchemaTypeEvolution, ViewSchemaMode, ViewType}
+import org.apache.spark.sql.catalyst.analysis.{AnalysisContext, GlobalTempView, LocalTempView, SchemaBinding, ViewSchemaMode, ViewType}
 import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable, CatalogTableType, TemporaryViewRelation}
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, SubqueryExpression, VariableReference}
 import org.apache.spark.sql.catalyst.plans.logical.{AnalysisOnlyCommand, CTEInChildren, CTERelationDef, LogicalPlan, Project, View, WithCTE}
@@ -307,7 +307,7 @@ case class AlterViewAsCommand(
       session,
       analyzedPlan.schema.fieldNames, // The query output column names
       analyzedPlan.schema.fieldNames, // Will match the view schema names
-      SchemaBinding)
+      viewMeta.viewSchemaMode)
 
     val newSchema = CharVarcharUtils.getRawSchema(analyzedPlan.schema)
     val updatedViewMeta = viewMeta.copy(
@@ -357,18 +357,12 @@ case class AlterViewSchemaBindingCommand(name: TableIdentifier, viewSchemaMode: 
     logDebug(s"Try to uncache ${viewIdent.quotedString} before replacing.")
     CommandUtils.uncacheTableOrView(session, viewIdent)
 
-    val finalSchemaMode =
-      if (viewSchemaMode == SchemaEvolution && !viewMeta.schema.fieldNames.isEmpty) {
-      SchemaTypeEvolution
-    } else {
-      viewSchemaMode
-    }
     val newProperties = generateViewProperties(
       viewMeta.properties,
       session,
       viewMeta.viewQueryColumnNames.toArray,
       viewMeta.schema.fieldNames,
-      finalSchemaMode)
+      viewSchemaMode)
 
     val updatedViewMeta = viewMeta.copy(
       properties = newProperties)
