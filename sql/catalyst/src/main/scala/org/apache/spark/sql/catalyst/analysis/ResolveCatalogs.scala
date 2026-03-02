@@ -137,9 +137,9 @@ class ResolveCatalogs(val catalogManager: CatalogManager)
 
   /**
    * Resolves a function identifier, checking for builtin and temp functions first.
-   * Builtin and temp functions are only registered with unqualified names, but can be
-   * referenced with qualified names like builtin.abs, system.builtin.abs, session.func,
-   * or system.session.func.
+   * Builtin functions are registered with unqualified names, while temp functions use
+   * composite keys. Both can be referenced with qualified names like builtin.abs,
+   * system.builtin.abs, session.func, or system.session.func.
    */
   private def resolveFunctionIdentifier(
       nameParts: Seq[String],
@@ -158,8 +158,7 @@ class ResolveCatalogs(val catalogManager: CatalogManager)
         ResolvedIdentifier(catalog, ident)
       }
     } else FunctionResolution.sessionNamespaceKind(nameParts) match {
-      case Some(SessionCatalog.Builtin) | Some(SessionCatalog.Extension) =>
-        // Explicitly qualified as builtin or extension (extension stored as builtin)
+      case Some(SessionCatalog.Builtin) =>
         val ident = Identifier.of(Array(CatalogManager.BUILTIN_NAMESPACE), nameParts.last)
         ResolvedIdentifier(FakeSystemCatalog, ident)
       case Some(SessionCatalog.Temp) =>
