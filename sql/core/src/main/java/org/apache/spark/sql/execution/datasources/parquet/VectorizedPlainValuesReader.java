@@ -72,9 +72,23 @@ public class VectorizedPlainValuesReader extends ValuesReader implements Vectori
       c.putBooleans(rowId, i, currentByte, bitOffset);
       bitOffset = (bitOffset + i) & 7;
     }
-    for (; i + 7 < total; i += 8) {
-      updateCurrentByte();
-      c.putBooleans(rowId + i, currentByte);
+    // Batch-read all full bytes in a single getBuffer call instead of per-byte in.read().
+    // getBuffer returns a slice with position=0 and remaining=fullBytes.
+    int fullBytes = (total - i) / 8;
+    if (fullBytes > 0) {
+      ByteBuffer buffer = getBuffer(fullBytes);
+      if (buffer.hasArray()) {
+        byte[] array = buffer.array();
+        int offset = buffer.arrayOffset() + buffer.position();
+        for (int j = 0; j < fullBytes; j++) {
+          c.putBooleans(rowId + i + j * 8, array[offset + j]);
+        }
+      } else {
+        for (int j = 0; j < fullBytes; j++) {
+          c.putBooleans(rowId + i + j * 8, buffer.get());
+        }
+      }
+      i += fullBytes * 8;
     }
     if (i < total) {
       updateCurrentByte();
@@ -198,18 +212,20 @@ public class VectorizedPlainValuesReader extends ValuesReader implements Vectori
   public final void readUnsignedLongs(int total, WritableColumnVector c, int rowId) {
     int requiredBytes = total * 8;
     ByteBuffer buffer = getBuffer(requiredBytes);
+    // scratch buffer: max 9 bytes (0x00 sign byte + 8 value bytes), reused per batch
+    byte[] scratch = new byte[9];
     if (buffer.hasArray()) {
       byte[] src = buffer.array();
       int offset = buffer.arrayOffset() + buffer.position();
       for (int i = 0; i < total; i++, rowId++, offset += 8) {
-        putLittleEndianBytesAsBigInteger(c, rowId, src, offset);
+        putLittleEndianBytesAsBigInteger(c, rowId, src, offset, scratch);
       }
     } else {
       // direct buffer fallback: copy 8 bytes per value
       byte[] data = new byte[8];
       for (int i = 0; i < total; i++, rowId++) {
         buffer.get(data);
-        putLittleEndianBytesAsBigInteger(c, rowId, data, 0);
+        putLittleEndianBytesAsBigInteger(c, rowId, data, 0, scratch);
       }
     }
   }
@@ -239,9 +255,11 @@ public class VectorizedPlainValuesReader extends ValuesReader implements Vectori
    * @param src    the source byte array containing little-endian encoded data
    * @param offset the starting position in {@code src}; reads bytes
    *               {@code src[offset..offset+7]}
+   * @param scratch a caller-provided reusable buffer of at least 9 bytes; its contents
+   *                after this call are undefined
    */
   private static void putLittleEndianBytesAsBigInteger(
-     WritableColumnVector c, int rowId, byte[] src, int offset) {
+     WritableColumnVector c, int rowId, byte[] src, int offset, byte[] scratch) {
     // src is little-endian; the most significant byte is at src[offset + 7].
     // Scan from the most significant end to find the first non-zero byte,
     // which determines the minimal number of bytes needed for encoding.
@@ -254,7 +272,9 @@ public class VectorizedPlainValuesReader extends ValuesReader implements Vectori
     // BigInteger.ZERO.toByteArray() returns [0x00], and new BigInteger(new byte[0])
     // throws NumberFormatException("Zero length BigInteger").
     if (msbIndex == offset && src[offset] == 0) {
-      c.putByteArray(rowId, new byte[]{0});
+      scratch[0] = 0x00;
+      // putByteArray copies the bytes into arrayData(), so scratch can be safely reused
+      c.putByteArray(rowId, scratch, 0, 1);
       return;
     }
 
@@ -266,16 +286,16 @@ public class VectorizedPlainValuesReader extends ValuesReader implements Vectori
     int valueLen = msbIndex - offset + 1;
     int totalLen = needSignByte ? valueLen + 1 : valueLen;
 
-    byte[] dest = new byte[totalLen];
-    int destOffset = 0;
+    int scratchOffset = 0;
     if (needSignByte) {
-      dest[destOffset++] = 0x00;
+      scratch[scratchOffset++] = 0x00;
     }
     // Reverse byte order: little-endian src → big-endian dest
     for (int i = msbIndex; i >= offset; i--) {
-      dest[destOffset++] = src[i];
+      scratch[scratchOffset++] = src[i];
     }
-    c.putByteArray(rowId, dest, 0, totalLen);
+    // putByteArray copies the bytes into arrayData(), so scratch can be safely reused
+    c.putByteArray(rowId, scratch, 0, totalLen);
   }
 
   // A fork of `readLongs` to rebase the timestamp values. For performance reasons, this method

@@ -688,7 +688,7 @@ class ScalarPandasUDFTestsMixin:
                 yield pd.Series(1)
 
         with self.assertRaisesRegex(
-            Exception, "The length of output in Scalar iterator.*" "the length of output was 1"
+            Exception, "The number of output rows.*must match the number of input rows"
         ):
             df.select(iter_udf_wong_output_size(col("id"))).collect()
 
@@ -701,7 +701,7 @@ class ScalarPandasUDFTestsMixin:
 
         with self.sql_conf({"spark.sql.execution.arrow.maxRecordsPerBatch": 3}):
             df1 = self.spark.range(10).repartition(1)
-            with self.assertRaisesRegex(Exception, "pandas iterator UDF should exhaust"):
+            with self.assertRaisesRegex(Exception, "The input iterator must be fully consumed"):
                 df1.select(iter_udf_not_reading_all_input(col("id"))).collect()
 
     def test_vectorized_udf_chained(self):
@@ -2043,6 +2043,25 @@ class ScalarPandasUDFTestsMixin:
                 with self.sql_conf({"spark.sql.execution.arrow.compression.codec": codec}):
                     result = df.select(plus_two("id").alias("result")).collect()
                     self.assertEqual(expected, result)
+
+    def test_scalar_iter_pandas_udf_with_single_output_batch(self):
+        @pandas_udf("long", PandasUDFType.SCALAR_ITER)
+        def return_one(iterator):
+            rows = 0
+            batches = 0
+            for s in iterator:
+                rows += len(s)
+                batches += 1
+
+            assert rows == 1000, rows
+            assert batches == 200, batches
+            yield pd.Series([1] * rows)
+
+        with self.sql_conf({"spark.sql.execution.arrow.maxRecordsPerBatch": 5}):
+            df = self.spark.range(0, 1000, 1, 1)
+            expected = [Row(one=1) for i in range(1000)]
+            result = df.select(return_one("id").alias("one")).collect()
+            self.assertEqual(expected, result)
 
 
 class ScalarPandasUDFTests(ScalarPandasUDFTestsMixin, ReusedSQLTestCase):
