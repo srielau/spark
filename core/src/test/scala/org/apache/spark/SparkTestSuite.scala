@@ -359,6 +359,9 @@ trait SparkTestSuite
             mismatches += s"queryContext[$idx].objectName: expected '${expected.objectName}'" +
               s" but got '${actual.objectName()}'"
           }
+          // If startIndex and stopIndex are -1, it means we simply want to check the
+          // fragment of the query context. This should be the case when the fragment is
+          // distinguished within the query text.
           if (expected.startIndex != -1 && actual.startIndex() != expected.startIndex) {
             mismatches += s"queryContext[$idx].startIndex: expected ${expected.startIndex}" +
               s" but got ${actual.startIndex()}"

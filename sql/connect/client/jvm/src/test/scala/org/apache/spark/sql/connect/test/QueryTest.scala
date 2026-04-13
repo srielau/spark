@@ -167,11 +167,14 @@ abstract class QueryTest extends ConnectFunSuite with SQLHelper {
             mismatches += s"queryContext[$idx].objectName: expected '${expected.objectName}'" +
               s" but got '${actual.objectName()}'"
           }
-          if (actual.startIndex() != expected.startIndex) {
+          // If startIndex and stopIndex are -1, it means we simply want to check the
+          // fragment of the query context. This should be the case when the fragment is
+          // distinguished within the query text.
+          if (expected.startIndex != -1 && actual.startIndex() != expected.startIndex) {
             mismatches += s"queryContext[$idx].startIndex: expected ${expected.startIndex}" +
               s" but got ${actual.startIndex()}"
           }
-          if (actual.stopIndex() != expected.stopIndex) {
+          if (expected.stopIndex != -1 && actual.stopIndex() != expected.stopIndex) {
             mismatches += s"queryContext[$idx].stopIndex: expected ${expected.stopIndex}" +
               s" but got ${actual.stopIndex()}"
           }
