@@ -152,47 +152,46 @@ abstract class QueryTest extends ConnectFunSuite with SQLHelper {
       mismatches += s"queryContext.length: expected ${queryContext.length}" +
         s" but got ${actualQueryContext.length}"
     }
-    actualQueryContext.zip(queryContext).zipWithIndex.foreach {
-      case ((actual, expected), idx) =>
-        if (actual.contextType() != expected.contextType) {
-          mismatches += s"queryContext[$idx].contextType: expected ${expected.contextType}" +
-            s" but got ${actual.contextType()}"
+    actualQueryContext.zip(queryContext).zipWithIndex.foreach { case ((actual, expected), idx) =>
+      if (actual.contextType() != expected.contextType) {
+        mismatches += s"queryContext[$idx].contextType: expected ${expected.contextType}" +
+          s" but got ${actual.contextType()}"
+      }
+      if (actual.contextType() == QueryContextType.SQL) {
+        if (actual.objectType() != expected.objectType) {
+          mismatches += s"queryContext[$idx].objectType: expected '${expected.objectType}'" +
+            s" but got '${actual.objectType()}'"
         }
-        if (actual.contextType() == QueryContextType.SQL) {
-          if (actual.objectType() != expected.objectType) {
-            mismatches += s"queryContext[$idx].objectType: expected '${expected.objectType}'" +
-              s" but got '${actual.objectType()}'"
-          }
-          if (actual.objectName() != expected.objectName) {
-            mismatches += s"queryContext[$idx].objectName: expected '${expected.objectName}'" +
-              s" but got '${actual.objectName()}'"
-          }
-          // If startIndex and stopIndex are -1, it means we simply want to check the
-          // fragment of the query context. This should be the case when the fragment is
-          // distinguished within the query text.
-          if (expected.startIndex != -1 && actual.startIndex() != expected.startIndex) {
-            mismatches += s"queryContext[$idx].startIndex: expected ${expected.startIndex}" +
-              s" but got ${actual.startIndex()}"
-          }
-          if (expected.stopIndex != -1 && actual.stopIndex() != expected.stopIndex) {
-            mismatches += s"queryContext[$idx].stopIndex: expected ${expected.stopIndex}" +
-              s" but got ${actual.stopIndex()}"
-          }
-          if (actual.fragment() != expected.fragment) {
-            mismatches += s"queryContext[$idx].fragment: expected '${expected.fragment}'" +
-              s" but got '${actual.fragment()}'"
-          }
-        } else if (actual.contextType() == QueryContextType.DataFrame) {
-          if (actual.fragment() != expected.fragment) {
-            mismatches += s"queryContext[$idx].fragment: expected '${expected.fragment}'" +
-              s" but got '${actual.fragment()}'"
-          }
-          if (expected.callSitePattern.nonEmpty &&
-              !actual.callSite().matches(expected.callSitePattern)) {
-            mismatches += s"queryContext[$idx].callSite: '${actual.callSite()}'" +
-              s" does not match pattern '${expected.callSitePattern}'"
-          }
+        if (actual.objectName() != expected.objectName) {
+          mismatches += s"queryContext[$idx].objectName: expected '${expected.objectName}'" +
+            s" but got '${actual.objectName()}'"
         }
+        // If startIndex and stopIndex are -1, it means we simply want to check the
+        // fragment of the query context. This should be the case when the fragment is
+        // distinguished within the query text.
+        if (expected.startIndex != -1 && actual.startIndex() != expected.startIndex) {
+          mismatches += s"queryContext[$idx].startIndex: expected ${expected.startIndex}" +
+            s" but got ${actual.startIndex()}"
+        }
+        if (expected.stopIndex != -1 && actual.stopIndex() != expected.stopIndex) {
+          mismatches += s"queryContext[$idx].stopIndex: expected ${expected.stopIndex}" +
+            s" but got ${actual.stopIndex()}"
+        }
+        if (actual.fragment() != expected.fragment) {
+          mismatches += s"queryContext[$idx].fragment: expected '${expected.fragment}'" +
+            s" but got '${actual.fragment()}'"
+        }
+      } else if (actual.contextType() == QueryContextType.DataFrame) {
+        if (actual.fragment() != expected.fragment) {
+          mismatches += s"queryContext[$idx].fragment: expected '${expected.fragment}'" +
+            s" but got '${actual.fragment()}'"
+        }
+        if (expected.callSitePattern.nonEmpty &&
+          !actual.callSite().matches(expected.callSitePattern)) {
+          mismatches += s"queryContext[$idx].callSite: '${actual.callSite()}'" +
+            s" does not match pattern '${expected.callSitePattern}'"
+        }
+      }
     }
 
     if (mismatches.nonEmpty) {
