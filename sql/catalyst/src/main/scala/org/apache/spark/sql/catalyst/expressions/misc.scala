@@ -251,7 +251,7 @@ case class CurrentCatalog()
 
 /**
  * Returns the current SQL path as a comma-separated list of qualified schema names
- * (catalog.schema). Responsive to USE SCHEMA / USE CATALOG when PATH feature is enabled.
+ * (catalog.schema). The result reflects the current catalog and schema context.
  */
 @ExpressionDescription(
   usage = "_FUNC_() - Returns the current SQL path (qualified schema names).",

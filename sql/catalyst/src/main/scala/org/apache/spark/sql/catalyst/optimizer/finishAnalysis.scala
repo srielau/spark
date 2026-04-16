@@ -161,7 +161,7 @@ case class ReplaceCurrentLike(catalogManager: CatalogManager) extends Rule[Logic
     lazy val currentUser = CurrentUserContext.getCurrentUser
     lazy val currentPathStr = {
       val catalogPath = (currentCatalog +: currentNamespaceSeq).toSeq
-      SQLConf.get.resolutionSearchPath(catalogPath).map(_.mkString(".")).mkString(",")
+      SQLConf.get.resolutionSearchPath(catalogPath).map(_.quoted).mkString(",")
     }
 
     plan.transformAllExpressionsWithPruning(_.containsPattern(CURRENT_LIKE)) {
