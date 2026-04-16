@@ -953,10 +953,9 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase with Compilat
    * Raises TABLE_OR_VIEW_NOT_FOUND with a formatted list of resolution path entries.
    *
    * @param quotedResolutionPathEntries each string is already a display-ready path entry (typically
-   *        `toSQLId` of each segment from `SQLConf.resolutionSearchPath`). They are joined with
-   *        ", " inside square brackets. This differs from [[noSuchTableError]](nameParts:
-   *        Seq[String]), which builds one dotted bracketed path from `nameParts.dropRight(1)` via
-   *        [[org.apache.spark.sql.catalyst.analysis.NoSuchTableException]].
+   *        `toSQLId` of each path entry from `SQLConf.sqlResolutionPathEntries`). They are joined
+   *        with ", " inside square brackets, same as
+   *        [[org.apache.spark.sql.catalyst.analysis.NoSuchItemExceptionHelper.formatSearchPath]].
    */
   def tableOrViewNotFoundWithSearchPath(
       name: Seq[String],
@@ -2456,6 +2455,12 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase with Compilat
       messageParameters = Map(
         "method" -> method,
         "config" -> SQLConf.LEGACY_PATH_OPTION_BEHAVIOR.key))
+  }
+
+  def invalidSqlPathSchemaReferenceError(qualifiedName: String): Throwable = {
+    new AnalysisException(
+      errorClass = "INVALID_SQL_PATH_SCHEMA_REFERENCE",
+      messageParameters = Map("qualifiedName" -> qualifiedName))
   }
 
   def userSpecifiedSchemaUnsupportedError(operation: String): Throwable = {

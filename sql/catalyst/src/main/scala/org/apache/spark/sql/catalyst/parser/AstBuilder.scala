@@ -4265,17 +4265,23 @@ class AstBuilder extends DataTypeAstBuilder
   protected def createUnresolvedTableOrView(
       ctx: IdentifierReferenceContext,
       commandName: String,
-      allowTempView: Boolean = true): LogicalPlan = withOrigin(ctx) {
-    withIdentClause(ctx, UnresolvedTableOrView(_, commandName, allowTempView))
+      allowTempView: Boolean = true,
+      tableNotFoundSearchPathMode: UnresolvedTableOrViewSearchPathMode =
+        UnresolvedTableOrViewSearchPathMode.Ddl): LogicalPlan = withOrigin(ctx) {
+    withIdentClause(
+      ctx,
+      UnresolvedTableOrView(_, commandName, allowTempView, tableNotFoundSearchPathMode))
   }
 
   private def createUnresolvedTableOrView(
       ctx: ParserRuleContext,
       ident: Seq[String],
       commandName: String,
-      allowTempView: Boolean): UnresolvedTableOrView = withOrigin(ctx) {
-    UnresolvedTableOrView(ident, commandName, allowTempView)
-  }
+      allowTempView: Boolean,
+      tableNotFoundSearchPathMode: UnresolvedTableOrViewSearchPathMode): UnresolvedTableOrView =
+    withOrigin(ctx) {
+      UnresolvedTableOrView(ident, commandName, allowTempView, tableNotFoundSearchPathMode)
+    }
 
   /**
    * Create an [[UnresolvedFunctionName]] from a multi-part identifier with proper origin.
@@ -6532,7 +6538,8 @@ class AstBuilder extends DataTypeAstBuilder
         ctx.table,
         ident,
         "SHOW COLUMNS",
-        allowTempView = true)
+        allowTempView = true,
+        UnresolvedTableOrViewSearchPathMode.Ddl)
       val namespace = Option(ctx.ns).map(visitMultipartIdentifier)
       // Use namespace only if table name doesn't specify it. If namespace is already specified
       // in the table name, it's checked against the given namespace after table/view is resolved.
