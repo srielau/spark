@@ -230,6 +230,8 @@ class PlanResolutionSuite extends SharedSparkSession with AnalysisTest {
       invocation.getArguments()(0).asInstanceOf[String] match {
         case "testcat" =>
           testCat
+        case CatalogManager.SESSION_CATALOG_NAME =>
+          v2SessionCatalog
         case name => throw QueryExecutionErrors.catalogNotFoundError(name)
       }
     })
