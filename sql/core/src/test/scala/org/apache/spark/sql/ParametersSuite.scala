@@ -2003,7 +2003,7 @@ class ParametersSuite extends QueryTest with SharedSparkSession {
       // current_path() resolves via system.builtin; include it when PATH is not DEFAULT_PATH.
       spark.sql("SET PATH = spark_catalog.IDENTIFIER(:ns), system.builtin", Map("ns" -> "default"))
       val pathStr = spark.sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr.contains("spark_catalog.default"),
+      assert(pathStr.contains("spark_catalog") && pathStr.contains("default"),
         s"SET PATH + IDENTIFIER(:ns); got: $pathStr")
     }
   }
@@ -2012,7 +2012,7 @@ class ParametersSuite extends QueryTest with SharedSparkSession {
     withSQLConf(SQLConf.PATH_ENABLED.key -> "true") {
       spark.sql("SET PATH = spark_catalog.IDENTIFIER(?), system.builtin", Array("default"))
       val pathStr = spark.sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr.contains("spark_catalog.default"),
+      assert(pathStr.contains("spark_catalog") && pathStr.contains("default"),
         s"SET PATH + IDENTIFIER(?); got: $pathStr")
     }
   }

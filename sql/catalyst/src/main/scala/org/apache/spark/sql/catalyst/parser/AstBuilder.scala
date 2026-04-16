@@ -3436,8 +3436,6 @@ class AstBuilder extends DataTypeAstBuilder
           CurrentTime()
         case SqlBaseParser.CURRENT_PATH =>
           CurrentPath()
-        case SqlBaseParser.CURRENT_DATABASE | SqlBaseParser.CURRENT_SCHEMA =>
-          CurrentDatabase()
         case SqlBaseParser.CURRENT_USER | SqlBaseParser.USER | SqlBaseParser.SESSION_USER =>
           CurrentUser()
       }
@@ -3445,8 +3443,6 @@ class AstBuilder extends DataTypeAstBuilder
       ctx.name.getType match {
         case SqlBaseParser.CURRENT_PATH =>
           CurrentPath()
-        case SqlBaseParser.CURRENT_DATABASE | SqlBaseParser.CURRENT_SCHEMA =>
-          CurrentDatabase()
         case _ =>
           // If the parser is not in ansi mode, we should return `UnresolvedAttribute`, in case
           // there are columns named `CURRENT_DATE` or `CURRENT_TIMESTAMP` or `CURRENT_TIME`.

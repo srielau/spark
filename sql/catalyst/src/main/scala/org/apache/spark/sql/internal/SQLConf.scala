@@ -8457,6 +8457,7 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
    * with markers expanded. Otherwise falls back to the legacy resolutionSearchPath.
    */
   def currentPathString(currentCatalog: String, currentNamespace: Seq[String]): String = {
+    import org.apache.spark.sql.connector.catalog.CatalogV2Implicits._
     val entries = effectivePathEntries match {
       case Some(stored) =>
         SQLConf.expandSessionPathMarkers(stored, currentCatalog, currentNamespace)
@@ -8464,7 +8465,7 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
         val catalogPath = (currentCatalog +: currentNamespace).toSeq
         resolutionSearchPath(catalogPath)
     }
-    SQLConf.formatSessionPath(entries)
+    entries.map(_.quoted).mkString(",")
   }
 
   /**

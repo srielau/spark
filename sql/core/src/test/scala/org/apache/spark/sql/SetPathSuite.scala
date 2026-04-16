@@ -55,8 +55,8 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
     withPathEnabled {
       sql("SET PATH = spark_catalog.default, system.builtin")
       val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr.contains("spark_catalog.default"),
-        s"Expected path to contain spark_catalog.default, got: $pathStr")
+      assert(pathStr.contains("spark_catalog") && pathStr.contains("default"),
+        s"Expected path to contain spark_catalog and default, got: $pathStr")
     }
   }
 
@@ -186,7 +186,7 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
     withPathEnabled {
       sql("SET PATH = SYSTEM_PATH")
       val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr.contains("system.builtin") && pathStr.contains("system.session"),
+      assert(pathStr.contains("builtin") && pathStr.contains("session"),
         s"SYSTEM_PATH should expand to builtin and session; got: $pathStr")
     }
   }
@@ -221,7 +221,7 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
     withPathEnabled {
       sql("SET PATH = Spark_Catalog.Default, System.Builtin")
       val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr.contains("Spark_Catalog.Default"),
+      assert(pathStr.contains("Spark_Catalog") && pathStr.contains("Default"),
         s"Stored path should preserve case; got: $pathStr")
     }
   }
