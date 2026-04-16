@@ -45,7 +45,10 @@ import org.apache.spark.sql.catalyst.expressions.CodegenObjectFactoryMode
 import org.apache.spark.sql.catalyst.expressions.codegen.CodeGenerator
 import org.apache.spark.sql.catalyst.plans.logical.HintErrorHandler
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
-import org.apache.spark.sql.connector.catalog.CatalogManager.SESSION_CATALOG_NAME
+import org.apache.spark.sql.connector.catalog.CatalogManager.{
+  SESSION_CATALOG_NAME,
+  SYSTEM_CATALOG_NAME
+}
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
 import org.apache.spark.sql.types.{AtomicType, TimestampNTZType, TimestampType}
 import org.apache.spark.storage.{StorageLevel, StorageLevelMapper}
@@ -139,6 +142,71 @@ object SQLConf {
       sqlConf.setConfString(k, v)
     }
   }
+
+  /**
+   * Second segment of the virtual path entry `system.current_schema` in `spark.sql.session.path`.
+   * CURRENT_SCHEMA and CURRENT_DATABASE in SET PATH both normalize to this sentinel (SQL aliases).
+   * It is stored literally and expanded to the session catalog + namespace when building routine
+   * resolution candidates and CURRENT_PATH().
+   */
+  private[sql] val SESSION_PATH_VIRTUAL_CURRENT_SCHEMA: String = "current_schema"
+
+  /** True if this path entry is the virtual current-schema slot (`system.current_schema`). */
+  private[sql] def isVirtualCurrentSchemaPathEntry(entry: Seq[String]): Boolean =
+    entry.length == 2 &&
+      entry.head.equalsIgnoreCase(SYSTEM_CATALOG_NAME) &&
+      entry(1).equalsIgnoreCase(SESSION_PATH_VIRTUAL_CURRENT_SCHEMA)
+
+  /** Materialize virtual current-schema entry for duplicate checks at SET PATH time. */
+  private[sql] def concreteSessionPathEntry(
+      entry: Seq[String],
+      currentCatalog: String,
+      currentNamespace: Seq[String]): Seq[String] = {
+    if (isVirtualCurrentSchemaPathEntry(entry)) {
+      if (currentNamespace.isEmpty) Seq(currentCatalog)
+      else currentCatalog +: currentNamespace
+    } else {
+      entry
+    }
+  }
+
+  /** Expand markers in stored session path using the current catalog and namespace. */
+  private[sql] def expandSessionPathMarkers(
+      entries: Seq[Seq[String]],
+      currentCatalog: String,
+      currentNamespace: Seq[String]): Seq[Seq[String]] =
+    entries.map(concreteSessionPathEntry(_, currentCatalog, currentNamespace))
+
+  /**
+   * Separator between path entries in serialized session path
+   * (catalog.namespace,catalog.namespace).
+   */
+  private[sql] val SESSION_PATH_ENTRY_SEPARATOR = ","
+
+  /**
+   * Parses a session path string into a list of path entries.
+   * Format: "catalog1.namespace1,catalog2.namespace2"
+   * (comma-separated, each entry catalog.namespace).
+   */
+  private[sql] def parseSessionPath(pathStr: String): Seq[Seq[String]] = {
+    if (pathStr == null || pathStr.trim.isEmpty) return Seq.empty
+    pathStr.split(SESSION_PATH_ENTRY_SEPARATOR).map { entry =>
+      val trimmed = entry.trim
+      val dot = trimmed.indexOf('.')
+      if (dot <= 0 || dot == trimmed.length - 1) {
+        Seq(trimmed)
+      } else {
+        Seq(trimmed.substring(0, dot).trim, trimmed.substring(dot + 1).trim)
+      }
+    }.toSeq.filter(_.nonEmpty)
+  }
+
+  /**
+   * Formats path entries to session path string.
+   * Each entry is catalog.namespace; entries separated by comma.
+   */
+  private[sql] def formatSessionPath(pathEntries: Seq[Seq[String]]): String =
+    pathEntries.map(_.mkString(".")).mkString(SESSION_PATH_ENTRY_SEPARATOR)
 
   /**
    * Default config. Only used when there is no active SparkSession for the thread.
@@ -2438,6 +2506,26 @@ object SQLConf {
       .withBindingPolicy(ConfigBindingPolicy.SESSION)
       .booleanConf
       .createWithDefault(false)
+
+  val PATH_ENABLED =
+    buildConf("spark.sql.path.enabled")
+      .version("4.2.0")
+      .doc("When true, enables the SQL Standard PATH feature: SET PATH, path-based routine " +
+        "resolution, and CURRENT_PATH(). When false, SET PATH has no effect and resolution uses " +
+        "the default path only.")
+      .withBindingPolicy(ConfigBindingPolicy.SESSION)
+      .booleanConf
+      .createWithDefault(false)
+
+  val SESSION_PATH =
+    buildConf("spark.sql.session.path")
+      .internal()
+      .version("4.2.0")
+      .doc("Session search path for routine resolution (catalog-qualified schema list). " +
+        "Only settable via SET PATH statement; direct SET of this config is ignored.")
+      .withBindingPolicy(ConfigBindingPolicy.SESSION)
+      .stringConf
+      .createOptional
 
   // Whether to retain group by columns or not in GroupedData.agg.
   val DATAFRAME_RETAIN_GROUP_COLUMNS = buildConf("spark.sql.retainGroupColumns")
@@ -8351,6 +8439,33 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
    * This is the inverse of [[SQLConf.PERSISTENT_CATALOG_FIRST]].
    */
   def prioritizeSystemCatalog: Boolean = !getConf(SQLConf.PERSISTENT_CATALOG_FIRST)
+
+  def pathEnabled: Boolean = getConf(SQLConf.PATH_ENABLED)
+
+  def sessionPath: Option[String] = getConf(SQLConf.SESSION_PATH)
+
+  /**
+   * Returns the session path as path entries when PATH is enabled and set; None otherwise.
+   */
+  def effectivePathEntries: Option[Seq[Seq[String]]] =
+    if (pathEnabled) sessionPath.map(SQLConf.parseSessionPath).filter(_.nonEmpty)
+    else None
+
+  /**
+   * String form of the current resolution path for CURRENT_PATH().
+   * When PATH is enabled and a session path is stored, formats the effective path entries
+   * with markers expanded. Otherwise falls back to the legacy resolutionSearchPath.
+   */
+  def currentPathString(currentCatalog: String, currentNamespace: Seq[String]): String = {
+    val entries = effectivePathEntries match {
+      case Some(stored) =>
+        SQLConf.expandSessionPathMarkers(stored, currentCatalog, currentNamespace)
+      case None =>
+        val catalogPath = (currentCatalog +: currentNamespace).toSeq
+        resolutionSearchPath(catalogPath)
+    }
+    SQLConf.formatSessionPath(entries)
+  }
 
   /**
    * Returns the resolution search path for error messages and resolution order.
