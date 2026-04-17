@@ -59,6 +59,28 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
       parameters = Map("config" -> SQLConf.PATH_ENABLED.key))
   }
 
+  test("PATH enabled but no SET PATH: falls back to legacy resolutionSearchPath") {
+    withPathEnabled {
+      val entries = pathEntries(currentPath())
+      assert(entries.exists(_.contains("builtin")),
+        s"Enabled-but-unset should fall back to legacy path with builtin, got: $entries")
+      assert(entries.exists(_.contains("default")),
+        s"Enabled-but-unset should include current schema, got: $entries")
+    }
+  }
+
+  test("PATH enabled: DEFAULT_PATH + explicit builtin raises duplicate") {
+    withPathEnabled {
+      checkError(
+        exception = intercept[AnalysisException] {
+          sql("SET PATH = DEFAULT_PATH, system.builtin")
+        },
+        condition = "DUPLICATE_SQL_PATH_ENTRY",
+        sqlState = Some("42732"),
+        parameters = Map("pathEntry" -> "system.builtin"))
+    }
+  }
+
   test("PATH enabled: SET PATH and CURRENT_PATH()") {
     withPathEnabled {
       sql("SET PATH = spark_catalog.default, system.builtin")
