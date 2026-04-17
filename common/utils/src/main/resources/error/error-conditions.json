@@ -7901,11 +7901,6 @@
           "Cannot have VARIANT type columns in DataFrame which calls set operations (INTERSECT, EXCEPT, etc.), but the type of column <colName> is <dataType>."
         ]
       },
-      "SET_PATH_VIA_SET" : {
-        "message" : [
-          "The session path cannot be set using the SET statement. Use SET PATH = ... instead."
-        ]
-      },
       "SET_PATH_WHEN_DISABLED" : {
         "message" : [
           "SET PATH is disabled. Set <config> to true to enable it."

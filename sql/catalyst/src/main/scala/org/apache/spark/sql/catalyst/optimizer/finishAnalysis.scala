@@ -161,7 +161,7 @@ case class ReplaceCurrentLike(
     lazy val currentNamespaceSeq = catalogManager.currentNamespace.toSeq
     lazy val currentCatalog = catalogManager.currentCatalog.name()
     lazy val currentUser = CurrentUserContext.getCurrentUser
-    lazy val currentPathStr = sqlConf.currentPathString(currentCatalog, currentNamespaceSeq)
+    lazy val currentPathStr = catalogManager.currentPathString
 
     plan.transformAllExpressionsWithPruning(_.containsPattern(CURRENT_LIKE)) {
       case CurrentDatabase() =>

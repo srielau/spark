@@ -144,7 +144,7 @@ object SQLConf {
   }
 
   /**
-   * Second segment of the virtual path entry `system.current_schema` in `spark.sql.session.path`.
+   * Second segment of the virtual path entry `system.current_schema` in the session path.
    * CURRENT_SCHEMA and CURRENT_DATABASE in SET PATH both normalize to this sentinel (SQL aliases).
    * It is stored literally and expanded to the current catalog + namespace when building routine
    * resolution candidates and CURRENT_PATH().
@@ -176,33 +176,6 @@ object SQLConf {
       currentCatalog: String,
       currentNamespace: Seq[String]): Seq[Seq[String]] =
     entries.map(concreteSessionPathEntry(_, currentCatalog, currentNamespace))
-
-  /** Separator between path entries (Record Separator). */
-  private[sql] val SESSION_PATH_ENTRY_SEPARATOR = "\u001E"
-
-  /** Separator between identifier parts within a single entry (Unit Separator). */
-  private[sql] val SESSION_PATH_PART_SEPARATOR = "\u001F"
-
-  /**
-   * Parses a session path string into a list of path entries.
-   * Uses \u001E between entries and \u001F between parts within each entry,
-   * so identifiers containing `.` or `,` round-trip correctly and multi-level
-   * namespaces are preserved.
-   */
-  private[sql] def parseSessionPath(pathStr: String): Seq[Seq[String]] = {
-    if (pathStr == null || pathStr.trim.isEmpty) return Seq.empty
-    pathStr.split(SESSION_PATH_ENTRY_SEPARATOR, -1).map { entry =>
-      entry.split(SESSION_PATH_PART_SEPARATOR, -1).toSeq
-    }.toSeq.filter(_.exists(_.nonEmpty))
-  }
-
-  /**
-   * Formats path entries into a session path string.
-   * Uses \u001E between entries and \u001F between parts within each entry.
-   */
-  private[sql] def formatSessionPath(pathEntries: Seq[Seq[String]]): String =
-    pathEntries.map(_.mkString(SESSION_PATH_PART_SEPARATOR))
-      .mkString(SESSION_PATH_ENTRY_SEPARATOR)
 
   /**
    * Default config. Only used when there is no active SparkSession for the thread.
@@ -2512,16 +2485,6 @@ object SQLConf {
       .withBindingPolicy(ConfigBindingPolicy.SESSION)
       .booleanConf
       .createWithDefault(false)
-
-  val SESSION_PATH =
-    buildConf("spark.sql.session.path")
-      .internal()
-      .version("4.2.0")
-      .doc("Session search path for routine resolution (catalog-qualified schema list). " +
-        "Only settable via SET PATH statement; direct SET of this config is ignored.")
-      .withBindingPolicy(ConfigBindingPolicy.SESSION)
-      .stringConf
-      .createOptional
 
   // Whether to retain group by columns or not in GroupedData.agg.
   val DATAFRAME_RETAIN_GROUP_COLUMNS = buildConf("spark.sql.retainGroupColumns")
@@ -8437,32 +8400,6 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
   def prioritizeSystemCatalog: Boolean = !getConf(SQLConf.PERSISTENT_CATALOG_FIRST)
 
   def pathEnabled: Boolean = getConf(SQLConf.PATH_ENABLED)
-
-  def sessionPath: Option[String] = getConf(SQLConf.SESSION_PATH)
-
-  /**
-   * Returns the session path as path entries when PATH is enabled and set; None otherwise.
-   */
-  def effectivePathEntries: Option[Seq[Seq[String]]] =
-    if (pathEnabled) sessionPath.map(SQLConf.parseSessionPath).filter(_.nonEmpty)
-    else None
-
-  /**
-   * String form of the current resolution path for CURRENT_PATH().
-   * When PATH is enabled and a session path is stored, formats the effective path entries
-   * with markers expanded. Otherwise falls back to the legacy resolutionSearchPath.
-   */
-  def currentPathString(currentCatalog: String, currentNamespace: Seq[String]): String = {
-    import org.apache.spark.sql.connector.catalog.CatalogV2Implicits._
-    val entries = effectivePathEntries match {
-      case Some(stored) =>
-        SQLConf.expandSessionPathMarkers(stored, currentCatalog, currentNamespace)
-      case None =>
-        val catalogPath = (currentCatalog +: currentNamespace).toSeq
-        resolutionSearchPath(catalogPath)
-    }
-    entries.map(_.quoted).mkString(",")
-  }
 
   /**
    * Returns the resolution search path for error messages and resolution order.

@@ -126,6 +126,42 @@ class CatalogManager(
     _currentNamespace = Some(namespace)
   }
 
+  private var _sessionPath: Option[Seq[Seq[String]]] = None
+
+  /** Returns the raw stored session path entries, or None if no path is set. */
+  def sessionPathEntries: Option[Seq[Seq[String]]] = synchronized { _sessionPath }
+
+  def setSessionPath(entries: Seq[Seq[String]]): Unit = synchronized {
+    _sessionPath = Some(entries)
+  }
+
+  def clearSessionPath(): Unit = synchronized {
+    _sessionPath = None
+  }
+
+  private[sql] def copySessionPathFrom(other: CatalogManager): Unit = synchronized {
+    _sessionPath = other.sessionPathEntries
+  }
+
+  /**
+   * String form of the current resolution path for CURRENT_PATH().
+   * When PATH is enabled and a session path is stored, formats the effective path entries
+   * with markers expanded. Otherwise falls back to the legacy resolutionSearchPath.
+   */
+  def currentPathString: String = {
+    import CatalogV2Implicits._
+    val entries = if (conf.pathEnabled) _sessionPath else None
+    entries match {
+      case Some(stored) =>
+        val expanded = SQLConf.expandSessionPathMarkers(
+          stored, currentCatalog.name(), currentNamespace.toSeq)
+        expanded.map(_.quoted).mkString(",")
+      case None =>
+        val catalogPath = (currentCatalog.name() +: currentNamespace).toSeq
+        conf.resolutionSearchPath(catalogPath).map(_.quoted).mkString(",")
+    }
+  }
+
   private var _currentCatalogName: Option[String] = None
 
   def currentCatalog: CatalogPlugin = synchronized {
@@ -154,6 +190,7 @@ class CatalogManager(
     catalogs.clear()
     _currentNamespace = None
     _currentCatalogName = None
+    _sessionPath = None
     v1SessionCatalog.setCurrentDatabase(conf.defaultDatabase)
   }
 }

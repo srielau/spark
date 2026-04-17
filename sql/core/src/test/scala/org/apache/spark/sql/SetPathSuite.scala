@@ -91,12 +91,26 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
     }
   }
 
-  test("direct SET of session path config is rejected") {
-    val err = intercept[AnalysisException] {
-      sql("SET spark.sql.session.path = 'spark_catalog.default'")
+  test("programmatic SET of spark.sql.session.path has no effect on CURRENT_PATH()") {
+    withPathEnabled {
+      sql("SET PATH = spark_catalog.default, system.builtin")
+      spark.conf.set("spark.sql.session.path", "garbage")
+      val entries = pathEntries(currentPath())
+      assert(entries === Seq("spark_catalog.default", "system.builtin"),
+        s"Programmatic SET should not affect path; got: $entries")
+      spark.conf.unset("spark.sql.session.path")
     }
-    assert(err.getMessage.contains("SET PATH"),
-      s"Expected SET_PATH_VIA_SET error, got: ${err.getMessage}")
+  }
+
+  test("PATH enabled: cloned session inherits parent path") {
+    withPathEnabled {
+      sql("SET PATH = spark_catalog.default, system.builtin")
+      val cloned = spark.cloneSession()
+      val clonedPath = cloned.sql("SELECT current_path()").collect().head.getString(0)
+      val entries = pathEntries(clonedPath)
+      assert(entries === Seq("spark_catalog.default", "system.builtin"),
+        s"Cloned session should inherit parent path; got: $entries")
+    }
   }
 
   test("PATH enabled: duplicate path entry raises error") {

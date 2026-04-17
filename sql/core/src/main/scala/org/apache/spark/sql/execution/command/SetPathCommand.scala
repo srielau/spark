@@ -65,7 +65,8 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
     val currentNamespace = catalogManager.currentNamespace.toSeq
     val caseSensitive = conf.caseSensitiveAnalysis
 
-    val expanded = expandPathElements(elements, conf, currentCatalog, currentNamespace)
+    val expanded = expandPathElements(elements, conf, catalogManager, currentCatalog,
+      currentNamespace)
     val seen = new scala.collection.mutable.HashSet[Seq[String]]
     expanded.foreach { entry =>
       val concrete =
@@ -80,9 +81,9 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
     }
 
     if (expanded.isEmpty) {
-      conf.unsetConf(SQLConf.SESSION_PATH)
+      catalogManager.clearSessionPath()
     } else {
-      conf.setConfString(SQLConf.SESSION_PATH.key, SQLConf.formatSessionPath(expanded))
+      catalogManager.setSessionPath(expanded)
     }
     Seq.empty
   }
@@ -90,6 +91,7 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
   private def expandPathElements(
       elements: Seq[PathElement],
       conf: SQLConf,
+      catalogManager: CatalogManager,
       currentCatalog: String,
       currentNamespace: Seq[String]): Seq[Seq[String]] = {
     val systemCatalog = CatalogManager.SYSTEM_CATALOG_NAME
@@ -113,10 +115,7 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
       case PathElement.CurrentDatabase | PathElement.CurrentSchema =>
         Seq(Seq(systemCatalog, SQLConf.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA))
       case PathElement.PathRef =>
-        conf.sessionPath match {
-          case Some(s) => SQLConf.parseSessionPath(s)
-          case None => Seq.empty
-        }
+        catalogManager.sessionPathEntries.getOrElse(Seq.empty)
       case PathElement.SchemaInPath(parts) =>
         qualifySchemaParts(parts)
     }
