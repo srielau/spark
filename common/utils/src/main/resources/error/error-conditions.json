@@ -4483,7 +4483,7 @@
   },
   "INVALID_SQL_PATH_SCHEMA_REFERENCE" : {
     "message" : [
-      "Invalid qualified name in SET PATH: <qualifiedName>. Use at most two name parts (catalog.schema)."
+      "Invalid schema reference in SET PATH: <qualifiedName>. Use at least two name parts (catalog.schema); multi-level namespaces are allowed."
     ],
     "sqlState" : "42601"
   },
@@ -7692,6 +7692,11 @@
       "DESC_TABLE_COLUMN_JSON" : {
         "message" : [
           "DESC TABLE COLUMN AS JSON not supported for individual columns."
+        ]
+      },
+      "DEFAULT_PATH_COMBINED" : {
+        "message" : [
+          "DEFAULT_PATH must be the sole element in SET PATH. It cannot be combined with other path elements."
         ]
       },
       "DESC_TABLE_COLUMN_PARTITION" : {

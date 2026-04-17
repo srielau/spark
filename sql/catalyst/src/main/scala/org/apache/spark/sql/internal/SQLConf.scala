@@ -146,7 +146,7 @@ object SQLConf {
   /**
    * Second segment of the virtual path entry `system.current_schema` in `spark.sql.session.path`.
    * CURRENT_SCHEMA and CURRENT_DATABASE in SET PATH both normalize to this sentinel (SQL aliases).
-   * It is stored literally and expanded to the session catalog + namespace when building routine
+   * It is stored literally and expanded to the current catalog + namespace when building routine
    * resolution candidates and CURRENT_PATH().
    */
   private[sql] val SESSION_PATH_VIRTUAL_CURRENT_SCHEMA: String = "current_schema"
@@ -177,36 +177,32 @@ object SQLConf {
       currentNamespace: Seq[String]): Seq[Seq[String]] =
     entries.map(concreteSessionPathEntry(_, currentCatalog, currentNamespace))
 
-  /**
-   * Separator between path entries in serialized session path
-   * (catalog.namespace,catalog.namespace).
-   */
-  private[sql] val SESSION_PATH_ENTRY_SEPARATOR = ","
+  /** Separator between path entries (Record Separator). */
+  private[sql] val SESSION_PATH_ENTRY_SEPARATOR = "\u001E"
+
+  /** Separator between identifier parts within a single entry (Unit Separator). */
+  private[sql] val SESSION_PATH_PART_SEPARATOR = "\u001F"
 
   /**
    * Parses a session path string into a list of path entries.
-   * Format: "catalog1.namespace1,catalog2.namespace2"
-   * (comma-separated, each entry catalog.namespace).
+   * Uses \u001E between entries and \u001F between parts within each entry,
+   * so identifiers containing `.` or `,` round-trip correctly and multi-level
+   * namespaces are preserved.
    */
   private[sql] def parseSessionPath(pathStr: String): Seq[Seq[String]] = {
     if (pathStr == null || pathStr.trim.isEmpty) return Seq.empty
-    pathStr.split(SESSION_PATH_ENTRY_SEPARATOR).map { entry =>
-      val trimmed = entry.trim
-      val dot = trimmed.indexOf('.')
-      if (dot <= 0 || dot == trimmed.length - 1) {
-        Seq(trimmed)
-      } else {
-        Seq(trimmed.substring(0, dot).trim, trimmed.substring(dot + 1).trim)
-      }
-    }.toSeq.filter(_.nonEmpty)
+    pathStr.split(SESSION_PATH_ENTRY_SEPARATOR, -1).map { entry =>
+      entry.split(SESSION_PATH_PART_SEPARATOR, -1).toSeq
+    }.toSeq.filter(_.exists(_.nonEmpty))
   }
 
   /**
-   * Formats path entries to session path string.
-   * Each entry is catalog.namespace; entries separated by comma.
+   * Formats path entries into a session path string.
+   * Uses \u001E between entries and \u001F between parts within each entry.
    */
   private[sql] def formatSessionPath(pathEntries: Seq[Seq[String]]): String =
-    pathEntries.map(_.mkString(".")).mkString(SESSION_PATH_ENTRY_SEPARATOR)
+    pathEntries.map(_.mkString(SESSION_PATH_PART_SEPARATOR))
+      .mkString(SESSION_PATH_ENTRY_SEPARATOR)
 
   /**
    * Default config. Only used when there is no active SparkSession for the thread.

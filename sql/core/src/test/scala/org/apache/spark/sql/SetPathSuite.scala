@@ -35,10 +35,18 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
     withSQLConf(SQLConf.PATH_ENABLED.key -> "true")(f)
   }
 
+  private def currentPath(): String =
+    sql("SELECT current_path()").collect().head.getString(0)
+
+  private def pathEntries(pathStr: String): Seq[String] =
+    pathStr.split(",").map(_.trim).toSeq
+
   test("PATH disabled: CURRENT_PATH() returns default path") {
-    val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-    assert(pathStr.contains("spark_catalog") && pathStr.contains("default"),
-      s"Expected default path to contain spark_catalog.default, got: $pathStr")
+    val entries = pathEntries(currentPath())
+    assert(entries.contains("spark_catalog.default"),
+      s"Expected default path to contain spark_catalog.default, got: $entries")
+    assert(entries.exists(_.contains("builtin")),
+      s"Expected default path to contain builtin, got: $entries")
   }
 
   test("PATH disabled: SET PATH is rejected") {
@@ -54,9 +62,9 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
   test("PATH enabled: SET PATH and CURRENT_PATH()") {
     withPathEnabled {
       sql("SET PATH = spark_catalog.default, system.builtin")
-      val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr.contains("spark_catalog") && pathStr.contains("default"),
-        s"Expected path to contain spark_catalog and default, got: $pathStr")
+      val entries = pathEntries(currentPath())
+      assert(entries === Seq("spark_catalog.default", "system.builtin"),
+        s"Expected exact path entries, got: $entries")
     }
   }
 
@@ -64,18 +72,22 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
     withPathEnabled {
       sql("SET PATH = spark_catalog.default")
       sql("SET PATH = DEFAULT_PATH")
-      val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr.contains("spark_catalog") && pathStr.contains("default"),
-        s"After SET PATH = DEFAULT_PATH expected default path, got: $pathStr")
+      val entries = pathEntries(currentPath())
+      assert(entries.contains("spark_catalog.default"),
+        s"After SET PATH = DEFAULT_PATH expected default path, got: $entries")
+      assert(entries.exists(_.contains("builtin")),
+        s"After SET PATH = DEFAULT_PATH expected builtin in path, got: $entries")
     }
   }
 
-  test("PATH enabled: CURRENT_PATH() with DEFAULT_PATH contains current schema") {
+  test("PATH enabled: DEFAULT_PATH combined with other elements is rejected") {
     withPathEnabled {
-      sql("SET PATH = DEFAULT_PATH")
-      val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr.contains("default"),
-        s"With DEFAULT_PATH, path should contain default schema, got: $pathStr")
+      checkError(
+        exception = intercept[AnalysisException] {
+          sql("SET PATH = spark_catalog.foo, DEFAULT_PATH")
+        },
+        condition = "UNSUPPORTED_FEATURE.DEFAULT_PATH_COMBINED",
+        sqlState = Some("0A000"))
     }
   }
 
@@ -105,9 +117,10 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
       try {
         sql("SET PATH = spark_catalog.default, system.builtin")
         sql("SET PATH = PATH, spark_catalog.path_append_test")
-        val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-        assert(pathStr.contains("path_append_test"),
-          s"PATH, schema should append; got: $pathStr")
+        val entries = pathEntries(currentPath())
+        assert(entries === Seq("spark_catalog.default", "system.builtin",
+          "spark_catalog.path_append_test"),
+          s"PATH, schema should append; got: $entries")
       } finally {
         sql("DROP SCHEMA IF EXISTS path_append_test")
       }
@@ -118,13 +131,26 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
     withPathEnabled {
       sql("USE spark_catalog.default")
       sql("SET PATH = current_schema, system.builtin")
-      val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr.contains("spark_catalog") && pathStr.contains("default"),
-        s"current_schema should expand to current schema, got: $pathStr")
+      val entries = pathEntries(currentPath())
+      assert(entries === Seq("spark_catalog.default", "system.builtin"),
+        s"current_schema should expand to current schema, got: $entries")
       sql("SET PATH = current_database, system.builtin")
-      val pathStr2 = sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr2.contains("spark_catalog") && pathStr2.contains("default"),
-        s"current_database should expand to current schema, got: $pathStr2")
+      val entries2 = pathEntries(currentPath())
+      assert(entries2 === Seq("spark_catalog.default", "system.builtin"),
+        s"current_database should expand to current schema, got: $entries2")
+    }
+  }
+
+  test("PATH enabled: cross-alias duplicate detection (current_database, current_schema)") {
+    withPathEnabled {
+      sql("USE spark_catalog.default")
+      checkError(
+        exception = intercept[AnalysisException] {
+          sql("SET PATH = current_database, current_schema")
+        },
+        condition = "DUPLICATE_SQL_PATH_ENTRY",
+        sqlState = Some("42732"),
+        parameters = Map("pathEntry" -> "spark_catalog.default"))
     }
   }
 
@@ -134,9 +160,9 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
       try {
         sql("USE spark_catalog.path_virt_schema")
         sql("SET PATH = current_schema, system.builtin")
-        val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-        assert(pathStr.contains("path_virt_schema"),
-          s"CURRENT_SCHEMA in PATH should reflect USE; got: $pathStr")
+        val entries = pathEntries(currentPath())
+        assert(entries === Seq("spark_catalog.path_virt_schema", "system.builtin"),
+          s"CURRENT_SCHEMA in PATH should reflect USE; got: $entries")
       } finally {
         sql("USE spark_catalog.default")
         sql("DROP SCHEMA IF EXISTS path_virt_schema")
@@ -185,9 +211,11 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
   test("PATH enabled: SET PATH = SYSTEM_PATH includes system.builtin and system.session") {
     withPathEnabled {
       sql("SET PATH = SYSTEM_PATH")
-      val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr.contains("builtin") && pathStr.contains("session"),
-        s"SYSTEM_PATH should expand to builtin and session; got: $pathStr")
+      val entries = pathEntries(currentPath())
+      assert(entries.contains("system.builtin"),
+        s"SYSTEM_PATH should include system.builtin; got: $entries")
+      assert(entries.contains("system.session"),
+        s"SYSTEM_PATH should include system.session; got: $entries")
     }
   }
 
@@ -195,34 +223,53 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
     withPathEnabled {
       sql("CREATE SCHEMA IF NOT EXISTS path_from_empty")
       try {
-        sql("SET PATH = DEFAULT_PATH, system.builtin")
+        sql("SET PATH = DEFAULT_PATH")
         sql("SET PATH = PATH, spark_catalog.path_from_empty")
-        val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-        assert(pathStr.contains("path_from_empty"),
-          s"PATH after cleared path should append schema; got: $pathStr")
+        val entries = pathEntries(currentPath())
+        assert(entries.contains("spark_catalog.path_from_empty"),
+          s"PATH after cleared path should append schema; got: $entries")
       } finally {
         sql("DROP SCHEMA IF EXISTS path_from_empty")
       }
     }
   }
 
-  test("PATH enabled: three-part schema reference is rejected") {
+  test("PATH enabled: unqualified (1-part) schema reference is rejected") {
     withPathEnabled {
       checkError(
         exception = intercept[AnalysisException] {
-          sql("SET PATH = a.b.c")
+          sql("SET PATH = myschema")
         },
         condition = "INVALID_SQL_PATH_SCHEMA_REFERENCE",
-        parameters = Map("qualifiedName" -> "a.b.c"))
+        parameters = Map(
+          "qualifiedName" -> "myschema"))
+    }
+  }
+
+  test("PATH enabled: multi-level namespace (3+ parts) is accepted") {
+    withPathEnabled {
+      sql("SET PATH = iceberg_cat.db1.db2, spark_catalog.default")
+      val entries = pathEntries(currentPath())
+      assert(entries.head === "iceberg_cat.db1.db2",
+        s"Multi-level namespace should be accepted; got: $entries")
+    }
+  }
+
+  test("PATH enabled: backtick-quoted identifiers with dots round-trip correctly") {
+    withPathEnabled {
+      sql("SET PATH = `cat.a`.`sch.b`")
+      val entries = pathEntries(currentPath())
+      assert(entries === Seq("`cat.a`.`sch.b`"),
+        s"Backtick-quoted identifiers should round-trip; got: $entries")
     }
   }
 
   test("PATH enabled: stored path preserves typed case, resolution is case-insensitive") {
     withPathEnabled {
       sql("SET PATH = Spark_Catalog.Default, System.Builtin")
-      val pathStr = sql("SELECT current_path()").collect().head.getString(0)
-      assert(pathStr.contains("Spark_Catalog") && pathStr.contains("Default"),
-        s"Stored path should preserve case; got: $pathStr")
+      val entries = pathEntries(currentPath())
+      assert(entries === Seq("Spark_Catalog.Default", "System.Builtin"),
+        s"Stored path should preserve case; got: $entries")
     }
   }
 }

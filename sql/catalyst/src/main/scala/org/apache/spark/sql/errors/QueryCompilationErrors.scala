@@ -953,9 +953,10 @@ private[sql] object QueryCompilationErrors extends QueryErrorsBase with Compilat
    * Raises TABLE_OR_VIEW_NOT_FOUND with a formatted list of resolution path entries.
    *
    * @param quotedResolutionPathEntries each string is already a display-ready path entry (typically
-   *        `toSQLId` of each path entry from `SQLConf.sqlResolutionPathEntries`). They are joined
-   *        with ", " inside square brackets, same as
-   *        [[org.apache.spark.sql.catalyst.analysis.NoSuchItemExceptionHelper.formatSearchPath]].
+   *        `toSQLId` of each segment from `SQLConf.resolutionSearchPath`). They are joined with
+   *        ", " inside square brackets. This differs from
+   *        [[org.apache.spark.sql.catalyst.analysis.NoSuchItemExceptionHelper.formatSearchPath]],
+   *        which builds one dotted bracketed path from a single search path.
    */
   def tableOrViewNotFoundWithSearchPath(
       name: Seq[String],

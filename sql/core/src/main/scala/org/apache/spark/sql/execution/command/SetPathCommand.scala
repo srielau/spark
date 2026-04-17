@@ -26,8 +26,8 @@ import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.internal.SQLConf
 
 /**
- * Path element for SET PATH: either a well-known shortcut or a schema (optionally qualified).
- * For SchemaInPath(parts), qualification with current catalog or SYSTEM is done at run time.
+ * Path element for SET PATH: either a well-known shortcut or a fully qualified schema reference.
+ * SchemaInPath requires at least 2 parts (catalog.namespace); multi-level namespaces are allowed.
  */
 sealed trait PathElement
 
@@ -41,7 +41,7 @@ object PathElement {
    */
   case object CurrentDatabase extends PathElement
   case object CurrentSchema extends PathElement
-  /** Schema name parts (1 = unqualified namespace, 2+ = catalog.namespace...). Qualified at run. */
+  /** Fully qualified schema reference (catalog.namespace...). Must have at least 2 parts. */
   case class SchemaInPath(parts: Seq[String]) extends PathElement
 }
 
@@ -66,26 +66,23 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
     val caseSensitive = conf.caseSensitiveAnalysis
 
     val expanded = expandPathElements(elements, conf, currentCatalog, currentNamespace)
-    val seen = new scala.collection.mutable.HashSet[(String, String)]
-    val deduped = expanded.flatMap { entry =>
+    val seen = new scala.collection.mutable.HashSet[Seq[String]]
+    expanded.foreach { entry =>
       val concrete =
         SQLConf.concreteSessionPathEntry(entry, currentCatalog, currentNamespace)
       def normalize(s: String): String = if (caseSensitive) s else s.toLowerCase(Locale.ROOT)
-      val key = (normalize(concrete.head),
-        normalize(concrete.lift(1).getOrElse("")))
-      if (seen.contains(key)) {
+      val key = concrete.map(normalize)
+      if (!seen.add(key)) {
         throw new AnalysisException(
           errorClass = "DUPLICATE_SQL_PATH_ENTRY",
           messageParameters = Map("pathEntry" -> concrete.mkString(".")))
       }
-      seen.add(key)
-      Some(entry)
     }
 
-    if (deduped.isEmpty) {
+    if (expanded.isEmpty) {
       conf.unsetConf(SQLConf.SESSION_PATH)
     } else {
-      conf.setConfString(SQLConf.SESSION_PATH.key, SQLConf.formatSessionPath(deduped))
+      conf.setConfString(SQLConf.SESSION_PATH.key, SQLConf.formatSessionPath(expanded))
     }
     Seq.empty
   }
@@ -96,15 +93,23 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
       currentCatalog: String,
       currentNamespace: Seq[String]): Seq[Seq[String]] = {
     val systemCatalog = CatalogManager.SYSTEM_CATALOG_NAME
-    val builtin = CatalogManager.BUILTIN_NAMESPACE
-    val session = CatalogManager.SESSION_NAMESPACE
+    val builtin = Seq(systemCatalog, CatalogManager.BUILTIN_NAMESPACE)
+    val session = Seq(systemCatalog, CatalogManager.SESSION_NAMESPACE)
 
     elements.flatMap {
       case PathElement.DefaultPath =>
-        // Default path = session order (first/second/last). Clear path; use at resolution time.
+        if (elements.size > 1) {
+          throw new AnalysisException(
+            errorClass = "UNSUPPORTED_FEATURE.DEFAULT_PATH_COMBINED",
+            messageParameters = Map.empty)
+        }
         Seq.empty
       case PathElement.SystemPath =>
-        Seq(Seq(systemCatalog, builtin), Seq(systemCatalog, session))
+        if (conf.sessionFunctionResolutionOrder == "first") {
+          Seq(session, builtin)
+        } else {
+          Seq(builtin, session)
+        }
       case PathElement.CurrentDatabase | PathElement.CurrentSchema =>
         Seq(Seq(systemCatalog, SQLConf.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA))
       case PathElement.PathRef =>
@@ -113,32 +118,15 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
           case None => Seq.empty
         }
       case PathElement.SchemaInPath(parts) =>
-        qualifySchemaParts(parts, systemCatalog, currentCatalog)
+        qualifySchemaParts(parts)
     }
   }
 
-  /** Qualify schema parts at SET time: well-known -> SYSTEM; else current catalog + namespace. */
-  private def qualifySchemaParts(
-      parts: Seq[String],
-      systemCatalog: String,
-      currentCatalog: String): Seq[Seq[String]] = {
-    val wellKnown = Set(
-      CatalogManager.BUILTIN_NAMESPACE.toLowerCase(Locale.ROOT),
-      CatalogManager.SESSION_NAMESPACE.toLowerCase(Locale.ROOT))
-    if (parts.isEmpty) return Seq.empty
-    if (parts.length > 2) {
+  private def qualifySchemaParts(parts: Seq[String]): Seq[Seq[String]] = {
+    if (parts.length < 2) {
       throw QueryCompilationErrors.invalidSqlPathSchemaReferenceError(parts.mkString("."))
     }
-    if (parts.size == 1) {
-      val ns = parts.head
-      if (wellKnown.contains(ns.toLowerCase(Locale.ROOT))) {
-        Seq(Seq(systemCatalog, ns))
-      } else {
-        Seq(Seq(currentCatalog, ns))
-      }
-    } else {
-      Seq(Seq(parts.head, parts(1)))
-    }
+    Seq(parts)
   }
 
 }
