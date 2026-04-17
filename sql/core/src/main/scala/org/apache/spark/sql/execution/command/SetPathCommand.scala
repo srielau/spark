@@ -70,7 +70,7 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
     val seen = new scala.collection.mutable.HashSet[Seq[String]]
     expanded.foreach { entry =>
       val concrete =
-        SQLConf.concreteSessionPathEntry(entry, currentCatalog, currentNamespace)
+        CatalogManager.concreteSessionPathEntry(entry, currentCatalog, currentNamespace)
       def normalize(s: String): String = if (caseSensitive) s else s.toLowerCase(Locale.ROOT)
       val key = concrete.map(normalize)
       if (!seen.add(key)) {
@@ -100,7 +100,7 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
 
     elements.flatMap {
       case PathElement.DefaultPath =>
-        val currentSchema = Seq(systemCatalog, SQLConf.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA)
+        val currentSchema = Seq(systemCatalog, CatalogManager.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA)
         conf.sessionFunctionResolutionOrder match {
           case "first" => Seq(session, builtin, currentSchema)
           case "last" => Seq(builtin, currentSchema, session)
@@ -113,7 +113,7 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
           Seq(builtin, session)
         }
       case PathElement.CurrentDatabase | PathElement.CurrentSchema =>
-        Seq(Seq(systemCatalog, SQLConf.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA))
+        Seq(Seq(systemCatalog, CatalogManager.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA))
       case PathElement.PathRef =>
         catalogManager.sessionPathEntries.getOrElse(Seq.empty)
       case PathElement.SchemaInPath(parts) =>

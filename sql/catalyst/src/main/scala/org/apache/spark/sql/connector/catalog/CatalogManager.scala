@@ -148,12 +148,12 @@ class CatalogManager(
    * When PATH is enabled and a session path is stored, formats the effective path entries
    * with markers expanded. Otherwise falls back to the legacy resolutionSearchPath.
    */
-  def currentPathString: String = {
+  def currentPathString: String = synchronized {
     import CatalogV2Implicits._
     val entries = if (conf.pathEnabled) _sessionPath else None
     entries match {
       case Some(stored) =>
-        val expanded = SQLConf.expandSessionPathMarkers(
+        val expanded = CatalogManager.expandSessionPathMarkers(
           stored, currentCatalog.name(), currentNamespace.toSeq)
         expanded.map(_.quoted).mkString(",")
       case None =>
@@ -241,4 +241,39 @@ private[sql] object CatalogManager {
     (nameParts.length == 2 && nameParts.head.equalsIgnoreCase(SESSION_NAMESPACE)) ||
       isFullyQualifiedSystemSessionViewName(nameParts)
   }
+
+  /** True if a SQL path entry denotes `system.session` (case-insensitive). */
+  def isSystemSessionPathEntry(parts: Seq[String]): Boolean =
+    parts.length == 2 &&
+      parts.head.equalsIgnoreCase(SYSTEM_CATALOG_NAME) &&
+      parts(1).equalsIgnoreCase(SESSION_NAMESPACE)
+
+  /** Virtual marker for CURRENT_SCHEMA / CURRENT_DATABASE in SET PATH. */
+  val SESSION_PATH_VIRTUAL_CURRENT_SCHEMA: String = "current_schema"
+
+  /** True if this path entry is the virtual current-schema slot (`system.current_schema`). */
+  def isVirtualCurrentSchemaPathEntry(entry: Seq[String]): Boolean =
+    entry.length == 2 &&
+      entry.head.equalsIgnoreCase(SYSTEM_CATALOG_NAME) &&
+      entry(1).equalsIgnoreCase(SESSION_PATH_VIRTUAL_CURRENT_SCHEMA)
+
+  /** Materialize virtual current-schema entry for duplicate checks at SET PATH time. */
+  def concreteSessionPathEntry(
+      entry: Seq[String],
+      currentCatalog: String,
+      currentNamespace: Seq[String]): Seq[String] = {
+    if (isVirtualCurrentSchemaPathEntry(entry)) {
+      if (currentNamespace.isEmpty) Seq(currentCatalog)
+      else currentCatalog +: currentNamespace
+    } else {
+      entry
+    }
+  }
+
+  /** Expand markers in stored session path using the current catalog and namespace. */
+  def expandSessionPathMarkers(
+      entries: Seq[Seq[String]],
+      currentCatalog: String,
+      currentNamespace: Seq[String]): Seq[Seq[String]] =
+    entries.map(concreteSessionPathEntry(_, currentCatalog, currentNamespace))
 }

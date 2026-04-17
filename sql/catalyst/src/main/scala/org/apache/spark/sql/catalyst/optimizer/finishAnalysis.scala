@@ -34,7 +34,6 @@ import org.apache.spark.sql.catalyst.util.DateTimeUtils.{convertSpecialDate, con
 import org.apache.spark.sql.catalyst.util.SparkDateTimeUtils.{instantToNanosOfDay, truncateTimeToPrecision}
 import org.apache.spark.sql.catalyst.util.TypeUtils.toSQLExpr
 import org.apache.spark.sql.connector.catalog.CatalogManager
-import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 
 
@@ -152,13 +151,10 @@ object ComputeCurrentTime extends Rule[LogicalPlan] {
  * Replaces the expression of CurrentDatabase, CurrentCatalog, CurrentPath, and CurrentUser
  * with the current values.
  */
-case class ReplaceCurrentLike(
-    catalogManager: CatalogManager,
-    sqlConf: SQLConf) extends Rule[LogicalPlan] {
+case class ReplaceCurrentLike(catalogManager: CatalogManager) extends Rule[LogicalPlan] {
   def apply(plan: LogicalPlan): LogicalPlan = {
     import org.apache.spark.sql.connector.catalog.CatalogV2Implicits._
     lazy val currentNamespace = catalogManager.currentNamespace.quoted
-    lazy val currentNamespaceSeq = catalogManager.currentNamespace.toSeq
     lazy val currentCatalog = catalogManager.currentCatalog.name()
     lazy val currentUser = CurrentUserContext.getCurrentUser
     lazy val currentPathStr = catalogManager.currentPathString

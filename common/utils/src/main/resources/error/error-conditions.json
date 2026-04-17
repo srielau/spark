@@ -2063,7 +2063,7 @@
   },
   "DUPLICATE_SQL_PATH_ENTRY" : {
     "message" : [
-      "Duplicate SQL path entry <pathEntry>. The session SQL path cannot contain the same catalog.schema more than once (including after expanding shortcuts like DEFAULT_PATH or SYSTEM_PATH)."
+      "Duplicate SQL path entry <pathEntry>. The session SQL path cannot contain the same namespace more than once (including after expanding shortcuts like DEFAULT_PATH or SYSTEM_PATH)."
     ],
     "sqlState" : "42732"
   },

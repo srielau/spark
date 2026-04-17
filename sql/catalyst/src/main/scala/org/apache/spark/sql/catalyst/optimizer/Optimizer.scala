@@ -335,7 +335,7 @@ abstract class Optimizer(catalogManager: CatalogManager)
       InsertMapSortInGroupingExpressions,
       InsertMapSortInRepartitionExpressions,
       ComputeCurrentTime,
-      ReplaceCurrentLike(catalogManager, conf),
+      ReplaceCurrentLike(catalogManager),
       SpecialDatetimeValues,
       RewriteAsOfJoin,
       EvalInlineTables,
