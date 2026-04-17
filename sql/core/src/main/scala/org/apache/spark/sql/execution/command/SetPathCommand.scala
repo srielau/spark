@@ -100,12 +100,12 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
 
     elements.flatMap {
       case PathElement.DefaultPath =>
-        if (elements.size > 1) {
-          throw new AnalysisException(
-            errorClass = "UNSUPPORTED_FEATURE.DEFAULT_PATH_COMBINED",
-            messageParameters = Map.empty)
+        val currentSchema = Seq(systemCatalog, SQLConf.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA)
+        conf.sessionFunctionResolutionOrder match {
+          case "first" => Seq(session, builtin, currentSchema)
+          case "last" => Seq(builtin, currentSchema, session)
+          case _ => Seq(builtin, session, currentSchema)
         }
-        Seq.empty
       case PathElement.SystemPath =>
         if (conf.sessionFunctionResolutionOrder == "first") {
           Seq(session, builtin)

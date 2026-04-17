@@ -74,20 +74,45 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
       sql("SET PATH = DEFAULT_PATH")
       val entries = pathEntries(currentPath())
       assert(entries.contains("spark_catalog.default"),
-        s"After SET PATH = DEFAULT_PATH expected default path, got: $entries")
-      assert(entries.exists(_.contains("builtin")),
-        s"After SET PATH = DEFAULT_PATH expected builtin in path, got: $entries")
+        s"After SET PATH = DEFAULT_PATH expected current schema in path, got: $entries")
+      assert(entries.contains("system.builtin"),
+        s"After SET PATH = DEFAULT_PATH expected system.builtin, got: $entries")
+      assert(entries.contains("system.session"),
+        s"After SET PATH = DEFAULT_PATH expected system.session, got: $entries")
+      assert(entries.length === 3,
+        s"DEFAULT_PATH should expand to 3 entries, got: $entries")
     }
   }
 
-  test("PATH enabled: DEFAULT_PATH combined with other elements is rejected") {
+  test("PATH enabled: DEFAULT_PATH composes with other path elements") {
+    withPathEnabled {
+      sql("CREATE SCHEMA IF NOT EXISTS path_extra_test")
+      try {
+        sql("SET PATH = DEFAULT_PATH, spark_catalog.path_extra_test")
+        val entries = pathEntries(currentPath())
+        assert(entries.contains("system.builtin"),
+          s"DEFAULT_PATH should include system.builtin; got: $entries")
+        assert(entries.contains("system.session"),
+          s"DEFAULT_PATH should include system.session; got: $entries")
+        assert(entries.last === "spark_catalog.path_extra_test",
+          s"Extra schema should be appended after DEFAULT_PATH; got: $entries")
+        assert(entries.length === 4,
+          s"DEFAULT_PATH + 1 extra should be 4 entries, got: $entries")
+      } finally {
+        sql("DROP SCHEMA IF EXISTS path_extra_test")
+      }
+    }
+  }
+
+  test("PATH enabled: DEFAULT_PATH, DEFAULT_PATH raises duplicate error") {
     withPathEnabled {
       checkError(
         exception = intercept[AnalysisException] {
-          sql("SET PATH = spark_catalog.foo, DEFAULT_PATH")
+          sql("SET PATH = DEFAULT_PATH, DEFAULT_PATH")
         },
-        condition = "UNSUPPORTED_FEATURE.DEFAULT_PATH_COMBINED",
-        sqlState = Some("0A000"))
+        condition = "DUPLICATE_SQL_PATH_ENTRY",
+        sqlState = Some("42732"),
+        parameters = Map("pathEntry" -> "system.builtin"))
     }
   }
 

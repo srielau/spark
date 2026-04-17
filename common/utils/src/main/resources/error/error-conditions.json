@@ -7694,11 +7694,6 @@
           "DESC TABLE COLUMN AS JSON not supported for individual columns."
         ]
       },
-      "DEFAULT_PATH_COMBINED" : {
-        "message" : [
-          "DEFAULT_PATH must be the sole element in SET PATH. It cannot be combined with other path elements."
-        ]
-      },
       "DESC_TABLE_COLUMN_PARTITION" : {
         "message" : [
           "DESC TABLE COLUMN for a specific partition."
