@@ -333,4 +333,30 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
         s"Stored path should preserve case; got: $entries")
     }
   }
+
+  test("PATH enabled: DEFAULT_PATH respects sessionFunctionResolutionOrder = first") {
+    withSQLConf(
+      SQLConf.PATH_ENABLED.key -> "true",
+      SQLConf.SESSION_FUNCTION_RESOLUTION_ORDER.key -> "first") {
+      sql("SET PATH = DEFAULT_PATH")
+      val entries = pathEntries(currentPath())
+      assert(entries.head.contains("session"),
+        s"With 'first' order, session should come first; got: $entries")
+    }
+  }
+
+  test("PATH enabled: DEFAULT_PATH respects sessionFunctionResolutionOrder = last") {
+    withSQLConf(
+      SQLConf.PATH_ENABLED.key -> "true",
+      SQLConf.SESSION_FUNCTION_RESOLUTION_ORDER.key -> "last") {
+      sql("SET PATH = DEFAULT_PATH")
+      val entries = pathEntries(currentPath())
+      assert(entries.last.contains("session"),
+        s"With 'last' order, session should come last; got: $entries")
+    }
+  }
+
+  // Note: cloneSession() shares the parent's CatalogManager, so SET PATH on either session
+  // affects both. This matches the behavior of USE CATALOG / USE SCHEMA on cloned sessions.
+  // Independence would require cloneSession to create a separate CatalogManager.
 }

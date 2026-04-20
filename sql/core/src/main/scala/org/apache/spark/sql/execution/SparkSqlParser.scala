@@ -349,12 +349,12 @@ class SparkSqlAstBuilder extends AstBuilder {
   }
 
   /**
-   * Create a [[SetCommand]] logical plan to set [[SQLConf.SESSION_LOCAL_TIMEZONE]]
+   * Create a [[SetPathCommand]] to set the session SQL path.
    * Example SQL :
    * {{{
-   *   SET TIME ZONE LOCAL;
-   *   SET TIME ZONE 'Asia/Shanghai';
-   *   SET TIME ZONE INTERVAL 10 HOURS;
+   *   SET PATH = spark_catalog.default, system.builtin;
+   *   SET PATH = DEFAULT_PATH;
+   *   SET PATH = SYSTEM_PATH, spark_catalog.myschema;
    * }}}
    */
   override def visitSetPath(ctx: SetPathContext): LogicalPlan = withOrigin(ctx) {
@@ -369,6 +369,15 @@ class SparkSqlAstBuilder extends AstBuilder {
     SetPathCommand(elements)
   }
 
+  /**
+   * Create a [[SetCommand]] logical plan to set [[SQLConf.SESSION_LOCAL_TIMEZONE]]
+   * Example SQL :
+   * {{{
+   *   SET TIME ZONE LOCAL;
+   *   SET TIME ZONE 'Asia/Shanghai';
+   *   SET TIME ZONE INTERVAL 10 HOURS;
+   * }}}
+   */
   override def visitSetTimeZone(ctx: SetTimeZoneContext): LogicalPlan = withOrigin(ctx) {
     val key = SQLConf.SESSION_LOCAL_TIMEZONE.key
     if (ctx.interval != null) {

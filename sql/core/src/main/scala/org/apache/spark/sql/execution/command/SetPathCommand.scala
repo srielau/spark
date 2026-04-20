@@ -76,7 +76,8 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
       if (!seen.add(key)) {
         throw new AnalysisException(
           errorClass = "DUPLICATE_SQL_PATH_ENTRY",
-          messageParameters = Map("pathEntry" -> concrete.mkString(".")))
+          messageParameters = Map("pathEntry" ->
+            concrete.map(p => if (p.contains(".")) s"`$p`" else p).mkString(".")))
       }
     }
 
@@ -95,23 +96,13 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
       currentCatalog: String,
       currentNamespace: Seq[String]): Seq[Seq[String]] = {
     val systemCatalog = CatalogManager.SYSTEM_CATALOG_NAME
-    val builtin = Seq(systemCatalog, CatalogManager.BUILTIN_NAMESPACE)
-    val session = Seq(systemCatalog, CatalogManager.SESSION_NAMESPACE)
 
     elements.flatMap {
       case PathElement.DefaultPath =>
         val currentSchema = Seq(systemCatalog, CatalogManager.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA)
-        conf.sessionFunctionResolutionOrder match {
-          case "first" => Seq(session, builtin, currentSchema)
-          case "last" => Seq(builtin, currentSchema, session)
-          case _ => Seq(builtin, session, currentSchema)
-        }
+        conf.defaultPathOrder(Seq(currentSchema))
       case PathElement.SystemPath =>
-        if (conf.sessionFunctionResolutionOrder == "first") {
-          Seq(session, builtin)
-        } else {
-          Seq(builtin, session)
-        }
+        conf.systemPathOrder
       case PathElement.CurrentDatabase | PathElement.CurrentSchema =>
         Seq(Seq(systemCatalog, CatalogManager.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA))
       case PathElement.PathRef =>

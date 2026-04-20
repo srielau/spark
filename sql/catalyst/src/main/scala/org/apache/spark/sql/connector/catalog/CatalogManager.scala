@@ -242,12 +242,6 @@ private[sql] object CatalogManager {
       isFullyQualifiedSystemSessionViewName(nameParts)
   }
 
-  /** True if a SQL path entry denotes `system.session` (case-insensitive). */
-  def isSystemSessionPathEntry(parts: Seq[String]): Boolean =
-    parts.length == 2 &&
-      parts.head.equalsIgnoreCase(SYSTEM_CATALOG_NAME) &&
-      parts(1).equalsIgnoreCase(SESSION_NAMESPACE)
-
   /** Virtual marker for CURRENT_SCHEMA / CURRENT_DATABASE in SET PATH. */
   val SESSION_PATH_VIRTUAL_CURRENT_SCHEMA: String = "current_schema"
 
