@@ -336,12 +336,24 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
     }
   }
 
-  test("PATH enabled: stored path preserves typed case, resolution is case-insensitive") {
+  test("PATH enabled: stored path preserves typed case") {
     withPathEnabled {
       sql("SET PATH = Spark_Catalog.Default, System.Builtin")
       val entries = pathEntries(currentPath())
       assert(entries === Seq("Spark_Catalog.Default", "System.Builtin"),
         s"Stored path should preserve case; got: $entries")
+    }
+  }
+
+  test("PATH enabled: case-insensitive duplicate detection") {
+    withPathEnabled {
+      checkError(
+        exception = intercept[AnalysisException] {
+          sql("SET PATH = spark_catalog.DEFAULT, spark_catalog.default")
+        },
+        condition = "DUPLICATE_SQL_PATH_ENTRY",
+        sqlState = Some("42732"),
+        parameters = Map("pathEntry" -> "spark_catalog.default"))
     }
   }
 
@@ -367,7 +379,9 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
     }
   }
 
-  // Note: cloneSession() shares the parent's CatalogManager, so SET PATH on either session
-  // affects both. This matches the behavior of USE CATALOG / USE SCHEMA on cloned sessions.
-  // Independence would require cloneSession to create a separate CatalogManager.
+  // TODO: cloneSession() constructs a new CatalogManager per forked session and
+  // explicitly copies only the stored session path via copySessionPathFrom.
+  // Other CatalogManager state propagation (current catalog/namespace, registered
+  // catalogs) on clone is currently incidental — audit and pin down the intended
+  // semantics in a follow-up.
 }
