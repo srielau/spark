@@ -22,6 +22,9 @@ import java.util.Locale
 import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.connector.catalog.CatalogManager
+import org.apache.spark.sql.connector.catalog.CatalogManager.{
+  CurrentSchemaEntry, LiteralPathEntry, SessionPathEntry
+}
 import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.internal.SQLConf
 
@@ -65,12 +68,10 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
     val currentNamespace = catalogManager.currentNamespace.toSeq
     val caseSensitive = conf.caseSensitiveAnalysis
 
-    val expanded = expandPathElements(elements, conf, catalogManager, currentCatalog,
-      currentNamespace)
+    val expanded = expandPathElements(elements, conf, catalogManager)
     val seen = new scala.collection.mutable.HashSet[Seq[String]]
     expanded.foreach { entry =>
-      val concrete =
-        CatalogManager.concreteSessionPathEntry(entry, currentCatalog, currentNamespace)
+      val concrete = entry.resolve(currentCatalog, currentNamespace)
       def normalize(s: String): String = if (caseSensitive) s else s.toLowerCase(Locale.ROOT)
       val key = concrete.map(normalize)
       if (!seen.add(key)) {
@@ -92,35 +93,32 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
   private def expandPathElements(
       elements: Seq[PathElement],
       conf: SQLConf,
-      catalogManager: CatalogManager,
-      currentCatalog: String,
-      currentNamespace: Seq[String]): Seq[Seq[String]] = {
-    val systemCatalog = CatalogManager.SYSTEM_CATALOG_NAME
+      catalogManager: CatalogManager): Seq[SessionPathEntry] = {
+    val currentSchemaSentinel = Seq("__current_schema__")
+
+    def toEntries(parts: Seq[Seq[String]]): Seq[SessionPathEntry] = parts.map {
+      case p if p == currentSchemaSentinel => CurrentSchemaEntry
+      case p => LiteralPathEntry(p)
+    }
+
+    def defaultWithCurrentSchema: Seq[SessionPathEntry] =
+      toEntries(conf.defaultPathOrder(Seq(currentSchemaSentinel)))
 
     elements.flatMap {
       case PathElement.DefaultPath =>
-        val currentSchema = Seq(systemCatalog, CatalogManager.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA)
-        conf.defaultPathOrder(Seq(currentSchema))
+        defaultWithCurrentSchema
       case PathElement.SystemPath =>
-        conf.systemPathOrder
+        toEntries(conf.systemPathOrder)
       case PathElement.CurrentDatabase | PathElement.CurrentSchema =>
-        Seq(Seq(systemCatalog, CatalogManager.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA))
+        Seq(CurrentSchemaEntry)
       case PathElement.PathRef =>
-        catalogManager.sessionPathEntries.getOrElse {
-          val currentSchema =
-            Seq(systemCatalog, CatalogManager.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA)
-          conf.defaultPathOrder(Seq(currentSchema))
-        }
+        catalogManager.sessionPathEntries.getOrElse(defaultWithCurrentSchema)
       case PathElement.SchemaInPath(parts) =>
-        qualifySchemaParts(parts)
+        if (parts.length < 2) {
+          throw QueryCompilationErrors.invalidSqlPathSchemaReferenceError(parts.mkString("."))
+        }
+        Seq(LiteralPathEntry(parts))
     }
-  }
-
-  private def qualifySchemaParts(parts: Seq[String]): Seq[Seq[String]] = {
-    if (parts.length < 2) {
-      throw QueryCompilationErrors.invalidSqlPathSchemaReferenceError(parts.mkString("."))
-    }
-    Seq(parts)
   }
 
 }

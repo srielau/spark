@@ -126,12 +126,14 @@ class CatalogManager(
     _currentNamespace = Some(namespace)
   }
 
-  private var _sessionPath: Option[Seq[Seq[String]]] = None
+  import CatalogManager.SessionPathEntry
+
+  private var _sessionPath: Option[Seq[SessionPathEntry]] = None
 
   /** Returns the raw stored session path entries, or None if no path is set. */
-  def sessionPathEntries: Option[Seq[Seq[String]]] = synchronized { _sessionPath }
+  def sessionPathEntries: Option[Seq[SessionPathEntry]] = synchronized { _sessionPath }
 
-  def setSessionPath(entries: Seq[Seq[String]]): Unit = synchronized {
+  def setSessionPath(entries: Seq[SessionPathEntry]): Unit = synchronized {
     _sessionPath = Some(entries)
   }
 
@@ -150,12 +152,12 @@ class CatalogManager(
    */
   def currentPathString: String = synchronized {
     import CatalogV2Implicits._
-    val entries = if (conf.pathEnabled) _sessionPath else None
-    entries match {
-      case Some(stored) =>
-        val expanded = CatalogManager.expandSessionPathMarkers(
-          stored, currentCatalog.name(), currentNamespace.toSeq)
-        expanded.map(_.quoted).mkString(",")
+    val stored = if (conf.pathEnabled) _sessionPath else None
+    stored match {
+      case Some(entries) =>
+        val resolved = CatalogManager.resolvePathEntries(
+          entries, currentCatalog.name(), currentNamespace.toSeq)
+        resolved.map(_.quoted).mkString(",")
       case None =>
         val catalogPath = (currentCatalog.name() +: currentNamespace).toSeq
         conf.resolutionSearchPath(catalogPath).map(_.quoted).mkString(",")
@@ -242,32 +244,32 @@ private[sql] object CatalogManager {
       isFullyQualifiedSystemSessionViewName(nameParts)
   }
 
-  /** Virtual marker for CURRENT_SCHEMA / CURRENT_DATABASE in SET PATH. */
-  val SESSION_PATH_VIRTUAL_CURRENT_SCHEMA: String = "current_schema"
-
-  /** True if this path entry is the virtual current-schema slot (`system.current_schema`). */
-  def isVirtualCurrentSchemaPathEntry(entry: Seq[String]): Boolean =
-    entry.length == 2 &&
-      entry.head.equalsIgnoreCase(SYSTEM_CATALOG_NAME) &&
-      entry(1).equalsIgnoreCase(SESSION_PATH_VIRTUAL_CURRENT_SCHEMA)
-
-  /** Materialize virtual current-schema entry for duplicate checks at SET PATH time. */
-  def concreteSessionPathEntry(
-      entry: Seq[String],
-      currentCatalog: String,
-      currentNamespace: Seq[String]): Seq[String] = {
-    if (isVirtualCurrentSchemaPathEntry(entry)) {
-      if (currentNamespace.isEmpty) Seq(currentCatalog)
-      else currentCatalog +: currentNamespace
-    } else {
-      entry
+  /**
+   * A single entry in the session SQL path: either a literal schema
+   * or the current-schema marker.
+   */
+  sealed trait SessionPathEntry {
+    /** Resolve to concrete catalog + namespace parts. */
+    def resolve(
+        currentCatalog: String,
+        currentNamespace: Seq[String]): Seq[String] = this match {
+      case CurrentSchemaEntry =>
+        if (currentNamespace.isEmpty) Seq(currentCatalog)
+        else currentCatalog +: currentNamespace
+      case LiteralPathEntry(parts) => parts
     }
   }
 
-  /** Expand markers in stored session path using the current catalog and namespace. */
-  def expandSessionPathMarkers(
-      entries: Seq[Seq[String]],
+  /** Marker for CURRENT_SCHEMA / CURRENT_DATABASE: expands dynamically with USE SCHEMA. */
+  case object CurrentSchemaEntry extends SessionPathEntry
+
+  /** A fully qualified schema reference (catalog.namespace...). */
+  case class LiteralPathEntry(parts: Seq[String]) extends SessionPathEntry
+
+  /** Resolve all entries in a session path to concrete catalog + namespace parts. */
+  def resolvePathEntries(
+      entries: Seq[SessionPathEntry],
       currentCatalog: String,
       currentNamespace: Seq[String]): Seq[Seq[String]] =
-    entries.map(concreteSessionPathEntry(_, currentCatalog, currentNamespace))
+    entries.map(_.resolve(currentCatalog, currentNamespace))
 }
