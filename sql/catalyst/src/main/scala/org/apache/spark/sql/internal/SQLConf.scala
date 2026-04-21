@@ -2443,7 +2443,7 @@ object SQLConf {
     buildConf("spark.sql.path.enabled")
       .version("4.2.0")
       .doc("When true, enables the SQL Standard PATH feature: SET PATH, path-based routine " +
-        "resolution, and CURRENT_PATH(). When false, SET PATH has no effect and resolution uses " +
+        "resolution, and CURRENT_PATH(). When false, SET PATH is rejected and resolution uses " +
         "the default path only.")
       .withBindingPolicy(ConfigBindingPolicy.SESSION)
       .booleanConf
@@ -8371,7 +8371,7 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
    * "last" (session last). When catalogPath is empty, returns only system namespaces.
    */
   def resolutionSearchPath(catalogPath: Seq[String]): Seq[Seq[String]] =
-    defaultPathOrder(Seq(catalogPath))
+    defaultPathOrder(if (catalogPath.isEmpty) Seq.empty else Seq(catalogPath))
 
   /**
    * Orders the given catalog path entries by [[sessionFunctionResolutionOrder]], inserting

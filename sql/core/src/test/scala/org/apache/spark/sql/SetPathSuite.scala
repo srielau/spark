@@ -280,6 +280,17 @@ class SetPathSuite extends QueryTest with SharedSparkSession {
     }
   }
 
+  test("PATH enabled: SET PATH = PATH on unset session includes defaults") {
+    withPathEnabled {
+      sql("SET PATH = PATH, spark_catalog.extra")
+      val entries = pathEntries(currentPath())
+      assert(entries.exists(_.contains("builtin")),
+        s"PATH on unset session should include builtin defaults; got: $entries")
+      assert(entries.contains("spark_catalog.extra"),
+        s"PATH on unset session should include appended schema; got: $entries")
+    }
+  }
+
   test("PATH enabled: SET PATH = PATH, schema after DEFAULT_PATH (empty session path)") {
     withPathEnabled {
       sql("CREATE SCHEMA IF NOT EXISTS path_from_empty")

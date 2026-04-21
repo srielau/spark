@@ -106,7 +106,11 @@ case class SetPathCommand(elements: Seq[PathElement]) extends LeafRunnableComman
       case PathElement.CurrentDatabase | PathElement.CurrentSchema =>
         Seq(Seq(systemCatalog, CatalogManager.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA))
       case PathElement.PathRef =>
-        catalogManager.sessionPathEntries.getOrElse(Seq.empty)
+        catalogManager.sessionPathEntries.getOrElse {
+          val currentSchema =
+            Seq(systemCatalog, CatalogManager.SESSION_PATH_VIRTUAL_CURRENT_SCHEMA)
+          conf.defaultPathOrder(Seq(currentSchema))
+        }
       case PathElement.SchemaInPath(parts) =>
         qualifySchemaParts(parts)
     }
