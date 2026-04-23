@@ -49,13 +49,17 @@ import org.apache.spark.util.ArrayImplicits._
 
 class RelationResolution(
     override val catalogManager: CatalogManager,
-    sharedRelationCache: RelationCache)
+    sharedRelationCache: RelationCache,
+    sessionConf: Option[SQLConf] = None)
     extends DataTypeErrorsBase
     with Logging
     with LookupCatalog
     with SQLConfHelper {
 
   type CacheKey = (Seq[String], Option[TimeTravelSpec])
+
+  /** Matches [[Analyzer.resolutionConf]] when the analyzer passes its session conf through. */
+  override def conf: SQLConf = sessionConf.getOrElse(SQLConf.get)
 
   val v1SessionCatalog = catalogManager.v1SessionCatalog
 
@@ -110,34 +114,61 @@ class RelationResolution(
 
   /**
    * Scope in the relation resolution search path. Used to interpret
-   * [[SQLConf.resolutionSearchPath]] when resolving unqualified table/view names.
+   * [[CatalogManager.sqlResolutionPathEntries]] when resolving unqualified table/view names.
    */
-  private sealed trait RelationResolutionScope
-  private case object SessionScope extends RelationResolutionScope
-  private case object PersistentScope extends RelationResolutionScope
+  private sealed trait RelationResolutionStep
+  private case object SessionScopeStep extends RelationResolutionStep
+  private case class PersistentCatalogStep(catalogAndNamespace: Seq[String])
+      extends RelationResolutionStep
 
   /**
-   * Returns the relation resolution search path for unqualified (1-part) names.
-   * Uses the single search path for all objects: [[SQLConf.resolutionSearchPath]].
-   * Maps path entries: system.session -> SessionScope, system.builtin -> skip (no views),
-   * other (catalog path) -> PersistentScope.
+   * Path entries for unqualified relation resolution.
+   *
+   * Inside a view, [[AnalysisContext.resolutionPathEntries]] will be
+   * populated from the frozen path stored in view metadata (follow-up PR).
+   * When PATH is disabled, legacy resolution rules apply.
    */
-  private def relationResolutionSearchPath: Seq[RelationResolutionScope] = {
-    val catalogPath = (currentCatalog.name +: catalogManager.currentNamespace).toSeq
-    conf.resolutionSearchPath(catalogPath).flatMap {
-      case Seq("system", "session") => Some(SessionScope)
+  private def relationResolutionEntries: Seq[Seq[String]] = {
+    val pinned = AnalysisContext.get.resolutionPathEntries
+    if (pinned.isDefined && conf.pathEnabled) {
+      pinned.get
+    } else {
+      val expandCatalog = catalogManager.currentCatalog.name
+      val expandNamespace = catalogManager.currentNamespace.toSeq
+      val (pathCatalog, pathNamespace) =
+        if (isResolvingView) {
+          val p = AnalysisContext.get.catalogAndNamespace
+          (p.head, p.tail.toSeq)
+        } else {
+          (expandCatalog, expandNamespace)
+        }
+      catalogManager.sqlResolutionPathEntries(
+        pathCatalog,
+        pathNamespace,
+        expandCatalog,
+        expandNamespace)
+    }
+  }
+
+  /**
+   * Ordered resolution steps for unqualified relation names. Each persistent path entry is kept
+   * with its catalog/namespace so lookup qualifies the object name under that entry (not only
+   * under the session's current namespace).
+   */
+  private def relationResolutionSteps: Seq[RelationResolutionStep] = {
+    relationResolutionEntries.flatMap {
+      case p if CatalogManager.isSystemSessionPathEntry(p) => Some(SessionScopeStep)
       case Seq("system", "builtin") => None
-      case _ => Some(PersistentScope)
+      case entry => Some(PersistentCatalogStep(entry))
     }
   }
 
   /**
    * Resolution search path formatted for TABLE_OR_VIEW_NOT_FOUND error messages.
-   * Same order as relationResolutionSearchPath; each entry is quoted (e.g. "`system`.`session`").
+   * Same order as [[relationResolutionSteps]]; each entry is quoted (e.g. "`system`.`session`").
    */
   def resolutionSearchPathForError: Seq[String] = {
-    val catalogPath = (currentCatalog.name +: catalogManager.currentNamespace).toSeq
-    conf.resolutionSearchPath(catalogPath).map(toSQLId)
+    relationResolutionEntries.map(toSQLId)
   }
 
   /**
@@ -195,15 +226,15 @@ class RelationResolution(
       ).orElse(tryResolvePersistent(u, identifier, finalTimeTravelSpec))
     }
 
-    // 1-part name: try each scope in relationResolutionSearchPath order (from
-    // [[SQLConf.resolutionSearchPath]]).
-    val candidates = relationResolutionSearchPath
-    for (scope <- candidates) {
-      val result = scope match {
-        case SessionScope =>
+    // 1-part name: try each step in [[relationResolutionSteps]] order (from
+    // [[CatalogManager.sqlResolutionPathEntries]]).
+    val steps = relationResolutionSteps
+    for (step <- steps) {
+      val result = step match {
+        case SessionScopeStep =>
           resolveTempView(identifier, u.isStreaming, finalTimeTravelSpec.isDefined)
-        case PersistentScope =>
-          tryResolvePersistent(u, identifier, finalTimeTravelSpec)
+        case PersistentCatalogStep(prefix) =>
+          tryResolvePersistent(u, prefix ++ identifier, finalTimeTravelSpec)
       }
       if (result.isDefined) return result
     }
