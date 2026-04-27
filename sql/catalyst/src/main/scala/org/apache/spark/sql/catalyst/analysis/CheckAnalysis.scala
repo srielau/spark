@@ -94,7 +94,7 @@ trait CheckAnalysis extends LookupCatalog with QueryErrorsBase with PlanToString
    * uses the view's defining catalog/namespace from AnalysisContext so the error
    * reflects where the view was trying to resolve.
    */
-  private def catalogPathForError: Seq[String] = {
+  protected final def catalogPathForError: Seq[String] = {
     val ctx = AnalysisContext.get.catalogAndNamespace
     if (ctx.nonEmpty) ctx
     else (currentCatalog.name +: catalogManager.currentNamespace).toSeq
@@ -395,8 +395,6 @@ trait CheckAnalysis extends LookupCatalog with QueryErrorsBase with PlanToString
       case u: UnresolvedTableOrView =>
         val catalogPath = catalogPathForError
         val searchPath = u.tableNotFoundSearchPathMode match {
-          case UnresolvedTableOrViewSearchPathMode.TempViewOnly =>
-            tempViewOnlySearchPathForError()
           case UnresolvedTableOrViewSearchPathMode.QueryLike =>
             if (CatalogManager.isFullyQualifiedSystemSessionViewName(u.multipartIdentifier)) {
               tempViewOnlySearchPathForError()

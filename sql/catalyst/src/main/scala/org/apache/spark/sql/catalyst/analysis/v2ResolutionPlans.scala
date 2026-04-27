@@ -79,11 +79,9 @@ object UnresolvedTableOrViewSearchPathMode {
   case object Ddl extends UnresolvedTableOrViewSearchPathMode
   /**
    * Like `SELECT` / DML: full `sqlResolutionPathEntries` order; fully qualified
-   * `system.session.*` names still use the temp-view-only path in errors.
+   * `system.session.*` names still use the session-only path in errors.
    */
   case object QueryLike extends UnresolvedTableOrViewSearchPathMode
-  /** Commands that only target temp views (e.g. some `DROP TEMPORARY VIEW` paths). */
-  case object TempViewOnly extends UnresolvedTableOrViewSearchPathMode
 }
 
 /**

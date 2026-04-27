@@ -140,8 +140,9 @@ object FakeV2SessionCatalog extends TableCatalog with FunctionCatalog with Suppo
  * @param outerPlan The query plan from the outer query that can be used to resolve star
  *                  expressions in a subquery.
  * @param resolutionPathEntries When resolving a view body, the ordered path for unqualified
- *                              relation names (see [[AnalysisContext.withAnalysisContext]]).
- *                              [[None]] outside views: compute from session
+ *                              relation names. Stays [[None]] in this PR; population from the
+ *                              frozen path stored in view metadata is wired in a follow-up.
+ *                              Outside views: compute from session
  *                              [[CatalogManager.sqlResolutionPathEntries]].
  */
 case class AnalysisContext(
@@ -154,7 +155,7 @@ case class AnalysisContext(
       mutable.Map.empty,
     referredTempViewNames: Seq[Seq[String]] = Seq.empty,
     // 1. If we are resolving a view, this field will be restored from the view metadata,
-    //    by calling `AnalysisContext.withAnalysisContext(viewDesc, catalogManager)`.
+    //    by calling `AnalysisContext.withAnalysisContext(viewDesc)`.
     // 2. If we are not resolving a view, this field will be updated everytime the analyzer
     //    lookup a temporary function. And export to the view metadata.
     referredTempFunctionNames: mutable.Set[String] = mutable.Set.empty,
@@ -2101,12 +2102,7 @@ class Analyzer(
                   throw QueryCompilationErrors.notAScalarFunctionError(nameParts.mkString("."), f)
 
                 case FunctionType.NotFound =>
-                  val catalogPath = {
-                    val ctx = AnalysisContext.get.catalogAndNamespace
-                    if (ctx.nonEmpty) ctx
-                    else (catalogManager.currentCatalog.name +:
-                      catalogManager.currentNamespace).toSeq
-                  }
+                  val catalogPath = catalogPathForError
                   val searchPath = catalogManager
                     .sqlResolutionPathEntries(catalogPath.head, catalogPath.tail.toSeq)
                     .map(_.quoted)

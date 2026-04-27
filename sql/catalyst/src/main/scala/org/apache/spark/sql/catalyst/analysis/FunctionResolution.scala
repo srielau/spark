@@ -645,6 +645,7 @@ class FunctionResolution(
    */
   def resolveProcedure(unresolved: UnresolvedProcedure): LogicalPlan = {
     val candidates = resolutionCandidates(unresolved.nameParts)
+    val skipCandidateFailures = unresolved.nameParts.length == 1
     for (multipart <- candidates) {
       val expandedOpt =
         try {
@@ -660,6 +661,13 @@ class FunctionResolution(
                 val procedure = pc.loadProcedure(ident)
                 return ResolvedProcedure(pc, ident, procedure)
               } catch {
+                // ProcedureCatalog has no standard "not found" exception type today. For
+                // unqualified names searched through PATH, treat candidate failures as misses and
+                // continue to the next entry (matching table/function PATH iteration semantics).
+                // Explicitly catalog-qualified names still preserve existing error behavior.
+                case _: AnalysisException if skipCandidateFailures =>
+                case _: SparkThrowable if skipCandidateFailures =>
+                case NonFatal(_) if skipCandidateFailures =>
                 case e: AnalysisException => throw e
                 case e: SparkThrowable => throw e
                 case NonFatal(e) =>

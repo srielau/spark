@@ -133,6 +133,8 @@ class RelationResolution(
     if (pinned.isDefined && conf.pathEnabled) {
       pinned.get
     } else {
+      // Keep expanding CurrentSchemaEntry using the live session catalog/namespace until the
+      // follow-up PR wires frozen resolutionPathEntries for view analysis.
       val expandCatalog = catalogManager.currentCatalog.name
       val expandNamespace = catalogManager.currentNamespace.toSeq
       val (pathCatalog, pathNamespace) =
