@@ -363,6 +363,9 @@ class Analyzer(
   }
 
   private def executeSameContext(plan: LogicalPlan): LogicalPlan = sessionConf match {
+    // Respect explicit nested SQLConf overrides (e.g. persisted SQL UDF/view configs).
+    // Otherwise, run analysis with the captured session conf for analyzer isolation.
+    case Some(c) if SQLConf.get ne c => super.execute(plan)
     case Some(c) => SQLConf.withExistingConf(c) { super.execute(plan) }
     case None => super.execute(plan)
   }
