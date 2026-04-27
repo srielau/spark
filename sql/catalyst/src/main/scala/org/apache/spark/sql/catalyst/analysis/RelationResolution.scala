@@ -49,17 +49,13 @@ import org.apache.spark.util.ArrayImplicits._
 
 class RelationResolution(
     override val catalogManager: CatalogManager,
-    sharedRelationCache: RelationCache,
-    sessionConf: Option[SQLConf] = None)
+    sharedRelationCache: RelationCache)
     extends DataTypeErrorsBase
     with Logging
     with LookupCatalog
     with SQLConfHelper {
 
   type CacheKey = (Seq[String], Option[TimeTravelSpec])
-
-  /** Matches [[Analyzer.resolutionConf]] when the analyzer passes its session conf through. */
-  override def conf: SQLConf = sessionConf.getOrElse(SQLConf.get)
 
   val v1SessionCatalog = catalogManager.v1SessionCatalog
 

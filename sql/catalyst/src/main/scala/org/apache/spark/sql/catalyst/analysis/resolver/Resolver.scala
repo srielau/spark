@@ -85,7 +85,6 @@ class Resolver(
     override val extensions: Seq[ResolverExtension] = Seq.empty,
     metadataResolverExtensions: Seq[ResolverExtension] = Seq.empty,
     externalRelationResolution: Option[RelationResolution] = None,
-    conf: SQLConf = SQLConf.get,
     extendedRewriteRules: Seq[Rule[LogicalPlan]] = Seq.empty,
     tracker: Option[QueryPlanningTracker] = None)
     extends LogicalPlanResolver
@@ -106,7 +105,7 @@ class Resolver(
   private val relationResolution = externalRelationResolution.getOrElse {
     Resolver.createRelationResolution(catalogManager, sharedRelationCache)
   }
-  private val functionResolution = new FunctionResolution(catalogManager, relationResolution, conf)
+  private val functionResolution = new FunctionResolution(catalogManager, relationResolution)
   private val expressionResolver = new ExpressionResolver(this, functionResolution, planLogger)
   private val aggregateResolver = new AggregateResolver(this, expressionResolver)
   private val expressionIdAssigner = expressionResolver.getExpressionIdAssigner
@@ -845,7 +844,7 @@ class Resolver(
         messageParameters = Map(
           "missingAttributes" -> makeCommaSeparatedExpressionString(missingInput.toSeq),
           "input" -> makeCommaSeparatedExpressionString(inputSet.toSeq),
-          "operator" -> operator.simpleString(conf.maxToStringFields),
+          "operator" -> operator.simpleString(SQLConf.get.maxToStringFields),
           "operation" -> makeCommaSeparatedExpressionString(attributesWithSameName.toSeq)
         )
       )
@@ -855,7 +854,7 @@ class Resolver(
         messageParameters = Map(
           "missingAttributes" -> makeCommaSeparatedExpressionString(missingInput.toSeq),
           "input" -> makeCommaSeparatedExpressionString(inputSet.toSeq),
-          "operator" -> operator.simpleString(conf.maxToStringFields)
+          "operator" -> operator.simpleString(SQLConf.get.maxToStringFields)
         )
       )
     }

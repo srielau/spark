@@ -24,7 +24,7 @@ import scala.util.control.NonFatal
 import org.apache.spark.SparkThrowable
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.AnalysisException
-import org.apache.spark.sql.catalyst.FunctionIdentifier
+import org.apache.spark.sql.catalyst.{FunctionIdentifier, SQLConfHelper}
 import org.apache.spark.sql.catalyst.analysis.FunctionRegistry
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate._
@@ -65,9 +65,8 @@ import org.apache.spark.sql.types._
 
 class FunctionResolution(
     override val catalogManager: CatalogManager,
-    relationResolution: RelationResolution,
-    conf: org.apache.spark.sql.internal.SQLConf)
-    extends DataTypeErrorsBase with LookupCatalog with Logging {
+    relationResolution: RelationResolution)
+    extends DataTypeErrorsBase with LookupCatalog with SQLConfHelper with Logging {
   private val v1SessionCatalog = catalogManager.v1SessionCatalog
 
   private val trimWarningEnabled = new AtomicBoolean(true)

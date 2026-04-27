@@ -300,15 +300,10 @@ class Analyzer(
   extends RuleExecutor[LogicalPlan]
   with CheckAnalysis with AliasHelper with SQLConfHelper with ColumnResolutionHelper {
 
-  /** Conf to use for path-based resolution and error messages; uses session conf when available. */
-  private[sql] def resolutionConf: SQLConf = sessionConf.getOrElse(SQLConf.get)
-
-
   private val v1SessionCatalog: SessionCatalog = catalogManager.v1SessionCatalog
   private val relationResolution =
-    new RelationResolution(catalogManager, sharedRelationCache, sessionConf)
-  private val functionResolution = new FunctionResolution(catalogManager, relationResolution,
-    resolutionConf)
+    new RelationResolution(catalogManager, sharedRelationCache)
+  private val functionResolution = new FunctionResolution(catalogManager, relationResolution)
 
   override protected def validatePlanChanges(
       previousPlan: LogicalPlan,
