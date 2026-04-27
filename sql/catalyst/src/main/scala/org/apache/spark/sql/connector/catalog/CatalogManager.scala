@@ -18,6 +18,7 @@
 package org.apache.spark.sql.connector.catalog
 
 import scala.collection.mutable
+import scala.util.Try
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.SQLConfHelper
@@ -348,5 +349,31 @@ private[sql] object CatalogManager {
     import org.json4s.jackson.JsonMethods.compact
     compact(JArray(entries.map(parts =>
       JArray(parts.map(JString(_)).toList)).toList))
+  }
+
+  /**
+   * Parse a stored frozen path string from view/function metadata.
+   * Returns None if the payload is malformed.
+   */
+  def deserializePathEntries(storedPathStr: String): Option[Seq[Seq[String]]] = {
+    import org.json4s.JsonAST.{JArray, JString}
+    import org.json4s.jackson.JsonMethods.parse
+
+    Try(parse(storedPathStr)).toOption match {
+      case Some(JArray(entries)) if entries.nonEmpty =>
+        val converted = entries.foldLeft(Option(Seq.empty[Seq[String]])) { (acc, entry) =>
+          acc.flatMap { collected =>
+            entry match {
+              case JArray(parts) if parts.nonEmpty =>
+                val strings = parts.collect { case JString(s) => s }
+                if (strings.size == parts.size) Some(collected :+ strings)
+                else None
+              case _ => None
+            }
+          }
+        }
+        converted.filter(_.nonEmpty)
+      case _ => None
+    }
   }
 }

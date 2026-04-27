@@ -18,6 +18,7 @@
 package org.apache.spark.sql.execution
 
 import org.apache.spark.sql.{AnalysisException, Row}
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.test.SharedSparkSession
 
 /**
@@ -109,6 +110,37 @@ class SQLFunctionSuite extends SharedSparkSession {
           stop = 60
         )
       )
+    }
+  }
+
+  test("SPARK-56639: SQL function uses frozen SQL path") {
+    withSQLConf(SQLConf.PATH_ENABLED.key -> "true") {
+      withDatabase("path_func_db_a", "path_func_db_b") {
+        withTable("path_func_db_a.frozen_t", "path_func_db_b.frozen_t") {
+          withUserDefinedFunction("frozen_fn" -> false) {
+            sql("USE default")
+            sql("CREATE DATABASE path_func_db_a")
+            sql("CREATE DATABASE path_func_db_b")
+            sql("CREATE TABLE path_func_db_a.frozen_t USING parquet AS SELECT 10 AS id")
+            sql("CREATE TABLE path_func_db_b.frozen_t USING parquet AS SELECT 20 AS id")
+            try {
+              sql("SET PATH = spark_catalog.path_func_db_a, system.builtin")
+              sql(
+                """
+                  |CREATE FUNCTION frozen_fn()
+                  |RETURNS INT
+                  |RETURN (SELECT MAX(id) FROM frozen_t)
+                  |""".stripMargin)
+              sql("SET PATH = spark_catalog.path_func_db_b, system.builtin")
+
+              checkAnswer(sql("SELECT MAX(id) FROM frozen_t"), Row(20))
+              checkAnswer(sql("SELECT default.frozen_fn()"), Row(10))
+            } finally {
+              sql("SET PATH = DEFAULT_PATH")
+            }
+          }
+        }
+      }
     }
   }
 }
