@@ -139,10 +139,9 @@ object FakeV2SessionCatalog extends TableCatalog with FunctionCatalog with Suppo
  *                              even if a temp view `t` has been created.
  * @param outerPlan The query plan from the outer query that can be used to resolve star
  *                  expressions in a subquery.
- * @param resolutionPathEntries When resolving a view body, the ordered path for unqualified
- *                              relation names. Stays [[None]] in this PR; population from the
- *                              frozen path stored in view metadata is wired in a follow-up.
- *                              Outside views: compute from session
+ * @param resolutionPathEntries When resolving a view or SQL function body, the ordered frozen
+ *                              path for unqualified relation/function names (if persisted in
+ *                              metadata). Outside views/functions, compute from session
  *                              [[CatalogManager.sqlResolutionPathEntries]].
  */
 case class AnalysisContext(
@@ -211,6 +210,8 @@ object AnalysisContext {
     val context = AnalysisContext(
       isDefault = false,
       catalogAndNamespace = viewDesc.viewCatalogAndNamespace,
+      resolutionPathEntries = viewDesc.viewStoredResolutionPath
+        .flatMap(CatalogManager.deserializePathEntries),
       nestedViewDepth = originContext.nestedViewDepth + 1,
       maxNestedViewDepth = maxNestedViewDepth,
       relationCache = originContext.relationCache,
@@ -224,7 +225,10 @@ object AnalysisContext {
 
   def withAnalysisContext[A](function: SQLFunction)(f: => A): A = {
     val originContext = value.get()
-    val context = originContext.copy(collation = function.collation)
+    val context = originContext.copy(
+      resolutionPathEntries = function.functionStoredResolutionPath
+        .flatMap(CatalogManager.deserializePathEntries),
+      collation = function.collation)
     set(context)
     try f finally { set(originContext) }
   }

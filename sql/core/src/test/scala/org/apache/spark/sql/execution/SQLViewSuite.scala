@@ -1409,4 +1409,30 @@ abstract class SQLViewSuite extends QueryTest {
       }
     }
   }
+
+  test("SPARK-56639: permanent view uses frozen SQL path") {
+    withSQLConf(PATH_ENABLED.key -> "true") {
+      withDatabase("path_view_db_a", "path_view_db_b") {
+        withTable("path_view_db_a.frozen_t", "path_view_db_b.frozen_t") {
+          withView("default.v_path_frozen") {
+            sql("USE default")
+            sql("CREATE DATABASE path_view_db_a")
+            sql("CREATE DATABASE path_view_db_b")
+            sql("CREATE TABLE path_view_db_a.frozen_t USING parquet AS SELECT 1 AS id")
+            sql("CREATE TABLE path_view_db_b.frozen_t USING parquet AS SELECT 2 AS id")
+            try {
+              sql("SET PATH = spark_catalog.path_view_db_a, system.builtin")
+              sql("CREATE VIEW default.v_path_frozen AS SELECT id FROM frozen_t")
+              sql("SET PATH = spark_catalog.path_view_db_b, system.builtin")
+
+              checkAnswer(sql("SELECT id FROM frozen_t"), Row(2))
+              checkAnswer(sql("SELECT id FROM default.v_path_frozen"), Row(1))
+            } finally {
+              sql("SET PATH = DEFAULT_PATH")
+            }
+          }
+        }
+      }
+    }
+  }
 }
