@@ -1435,4 +1435,39 @@ abstract class SQLViewSuite extends QueryTest {
       }
     }
   }
+
+  test("SPARK-56639: current_schema/current_path in persisted view use invoker context") {
+    withSQLConf(PATH_ENABLED.key -> "true") {
+      withDatabase("path_ctx_view_a", "path_ctx_view_b") {
+        withView("path_ctx_view_a.v_ctx") {
+          sql("CREATE DATABASE path_ctx_view_a")
+          sql("CREATE DATABASE path_ctx_view_b")
+          try {
+            sql("USE path_ctx_view_a")
+            sql(
+              """
+                |CREATE VIEW path_ctx_view_a.v_ctx AS
+                |SELECT current_schema() AS cs, current_path() AS cp
+                |""".stripMargin)
+
+            sql("USE path_ctx_view_b")
+            sql("SET PATH = DEFAULT_PATH")
+            val row = sql("SELECT cs, cp FROM path_ctx_view_a.v_ctx").head()
+            val currentSchema = row.getString(0)
+            val currentPath = row.getString(1)
+
+            assert(currentSchema == "path_ctx_view_b",
+              s"Expected invoker current_schema, got: $currentSchema")
+            assert(currentPath.contains("path_ctx_view_b"),
+              s"Expected invoker current_path to include path_ctx_view_b, got: $currentPath")
+            assert(!currentPath.contains("path_ctx_view_a"),
+              s"Did not expect creator schema in current_path, got: $currentPath")
+          } finally {
+            sql("SET PATH = DEFAULT_PATH")
+            sql("USE default")
+          }
+        }
+      }
+    }
+  }
 }
