@@ -143,4 +143,35 @@ class SQLFunctionSuite extends SharedSparkSession {
       }
     }
   }
+
+  test("SPARK-56639: SQL table function uses frozen SQL path") {
+    withSQLConf(SQLConf.PATH_ENABLED.key -> "true") {
+      withDatabase("path_tvf_db_a", "path_tvf_db_b") {
+        withTable("path_tvf_db_a.frozen_t", "path_tvf_db_b.frozen_t") {
+          withUserDefinedFunction("frozen_tvf" -> false) {
+            sql("USE default")
+            sql("CREATE DATABASE path_tvf_db_a")
+            sql("CREATE DATABASE path_tvf_db_b")
+            sql("CREATE TABLE path_tvf_db_a.frozen_t USING parquet AS SELECT 100 AS id")
+            sql("CREATE TABLE path_tvf_db_b.frozen_t USING parquet AS SELECT 200 AS id")
+            try {
+              sql("SET PATH = spark_catalog.path_tvf_db_a, system.builtin")
+              sql(
+                """
+                  |CREATE FUNCTION frozen_tvf()
+                  |RETURNS TABLE(id INT)
+                  |RETURN SELECT MAX(id) AS id FROM frozen_t
+                  |""".stripMargin)
+              sql("SET PATH = spark_catalog.path_tvf_db_b, system.builtin")
+
+              checkAnswer(sql("SELECT MAX(id) FROM frozen_t"), Row(200))
+              checkAnswer(sql("SELECT * FROM default.frozen_tvf()"), Row(100))
+            } finally {
+              sql("SET PATH = DEFAULT_PATH")
+            }
+          }
+        }
+      }
+    }
+  }
 }
