@@ -2100,10 +2100,8 @@ class Analyzer(
                   throw QueryCompilationErrors.notAScalarFunctionError(nameParts.mkString("."), f)
 
                 case FunctionType.NotFound =>
-                  val catalogPath = catalogPathForError
-                  val searchPath = catalogManager
-                    .sqlResolutionPathEntries(catalogPath.head, catalogPath.tail.toSeq)
-                    .map(_.quoted)
+                  val searchPath =
+                    functionResolution.sqlResolutionPathEntriesForAnalysis.map(_.quoted)
                   throw QueryCompilationErrors.unresolvedRoutineError(
                     nameParts,
                     searchPath,

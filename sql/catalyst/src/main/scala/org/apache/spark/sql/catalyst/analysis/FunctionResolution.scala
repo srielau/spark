@@ -101,7 +101,7 @@ class FunctionResolution(
    * directly, matching [[RelationResolution.relationResolutionEntries]] so routine order stays
    * aligned with relation order.
    */
-  private def sqlResolutionPathEntriesForAnalysis: Seq[Seq[String]] = {
+  private[analysis] def sqlResolutionPathEntriesForAnalysis: Seq[Seq[String]] = {
     AnalysisContext.get.resolutionPathEntries match {
       case Some(entries) if conf.pathEnabled => entries
       case _ =>

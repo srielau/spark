@@ -26,6 +26,7 @@ import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.QueryPlanningTracker
 import org.apache.spark.sql.catalyst.analysis.{
   withPosition,
+  AnalysisContext,
   AnalysisErrorAt,
   CleanupAliases,
   FunctionResolution,
@@ -583,8 +584,11 @@ class Resolver(
           relationsWithResolvedMetadata
         case None =>
           val multipartId = unresolvedRelation.multipartIdentifier
-          val catalogPath = (catalogManager.currentCatalog.name() +:
-            catalogManager.currentNamespace).toSeq
+          val catalogPath = {
+            val ctx = AnalysisContext.get.catalogAndNamespace
+            if (ctx.nonEmpty) ctx
+            else (catalogManager.currentCatalog.name() +: catalogManager.currentNamespace).toSeq
+          }
           val searchPath = catalogManager
             .sqlResolutionPathEntries(catalogPath.head, catalogPath.tail.toSeq)
             .map(toSQLId)
