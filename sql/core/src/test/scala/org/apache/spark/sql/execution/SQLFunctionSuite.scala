@@ -174,4 +174,55 @@ class SQLFunctionSuite extends SharedSparkSession {
       }
     }
   }
+
+  test("SPARK-56639: current_schema/current_path in SQL functions use invoker context") {
+    withSQLConf(SQLConf.PATH_ENABLED.key -> "true") {
+      withDatabase("path_ctx_fn_a", "path_ctx_fn_b") {
+        withUserDefinedFunction("path_ctx_fn_a.f_scalar_ctx" -> false,
+          "path_ctx_fn_a.f_table_ctx" -> false) {
+          sql("CREATE DATABASE path_ctx_fn_a")
+          sql("CREATE DATABASE path_ctx_fn_b")
+          try {
+            sql("USE path_ctx_fn_a")
+            sql(
+              """
+                |CREATE FUNCTION path_ctx_fn_a.f_scalar_ctx()
+                |RETURNS STRING
+                |RETURN concat(current_schema(), '::', current_path())
+                |""".stripMargin)
+            sql(
+              """
+                |CREATE FUNCTION path_ctx_fn_a.f_table_ctx()
+                |RETURNS TABLE(cs STRING, cp STRING)
+                |RETURN SELECT current_schema() AS cs, current_path() AS cp
+                |""".stripMargin)
+
+            sql("USE path_ctx_fn_b")
+            sql("SET PATH = DEFAULT_PATH")
+
+            val scalar = sql("SELECT path_ctx_fn_a.f_scalar_ctx()").head().getString(0)
+            assert(scalar.startsWith("path_ctx_fn_b::"),
+              s"Expected scalar function to use invoker current_schema, got: $scalar")
+            assert(scalar.contains("path_ctx_fn_b"),
+              s"Expected scalar function to use invoker current_path, got: $scalar")
+            assert(!scalar.contains("path_ctx_fn_a"),
+              s"Did not expect creator schema in scalar function context, got: $scalar")
+
+            val table = sql("SELECT cs, cp FROM path_ctx_fn_a.f_table_ctx()").head()
+            val tableSchema = table.getString(0)
+            val tablePath = table.getString(1)
+            assert(tableSchema == "path_ctx_fn_b",
+              s"Expected table function to use invoker current_schema, got: $tableSchema")
+            assert(tablePath.contains("path_ctx_fn_b"),
+              s"Expected table function to use invoker current_path, got: $tablePath")
+            assert(!tablePath.contains("path_ctx_fn_a"),
+              s"Did not expect creator schema in table function context, got: $tablePath")
+          } finally {
+            sql("SET PATH = DEFAULT_PATH")
+            sql("USE default")
+          }
+        }
+      }
+    }
+  }
 }
