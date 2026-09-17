@@ -341,7 +341,8 @@ class RelationResolution(
                 writePrivileges == null && !u.isStreaming
               cached <- lookupSharedRelationCache(catalog, ident, t, finalOptions)
             } yield {
-              val updatedRelation = cached.copy(options = finalOptions)
+              val updatedRelation =
+                cached.copy(options = finalOptions, charVarcharScanMode = None)
               updatedRelation.copyTagsFrom(cached)
               val nameParts = ident.toQualifiedNameParts(catalog)
               val aliasedRelation = SubqueryAlias(nameParts, updatedRelation)

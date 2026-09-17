@@ -29,7 +29,7 @@ import org.apache.spark.internal.LogKeys.{COUNT, DATABASE_NAME, ERROR, TABLE_NAM
 import org.apache.spark.sql.catalyst.{FileSourceOptions, InternalRow, TableIdentifier}
 import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
 import org.apache.spark.sql.catalyst.analysis.ResolvedIdentifier
-import org.apache.spark.sql.catalyst.catalog.{CatalogStatistics, CatalogTable, CatalogTablePartition, ExternalCatalogUtils}
+import org.apache.spark.sql.catalyst.catalog.{CatalogStatistics, CatalogTable, CatalogTablePartition, ExternalCatalogUtils, HiveTableRelation}
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate._
@@ -39,7 +39,7 @@ import org.apache.spark.sql.classic.SparkSession
 import org.apache.spark.sql.connector.catalog.CatalogV2Implicits.IdentifierHelper
 import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.execution.{QueryExecution, RemoveShuffleFiles}
-import org.apache.spark.sql.execution.datasources.{DataSourceUtils, InMemoryFileIndex}
+import org.apache.spark.sql.execution.datasources.{DataSourceUtils, InMemoryFileIndex, LogicalRelationWithTable}
 import org.apache.spark.sql.execution.datasources.v2.ExtractV2CatalogAndIdentifier
 import org.apache.spark.sql.functions.{col, lit}
 import org.apache.spark.sql.internal.{SessionState, SQLConf}
@@ -518,12 +518,23 @@ object CommandUtils extends Logging {
   // if the passed relation is a DSv2 relation without time travel,
   // this method recaches all cache entries for the given table by name (including time travel)
   def recacheTableOrView(sparkSession: SparkSession, relation: LogicalPlan): Unit = {
-    EliminateSubqueryAliases(relation) match {
+    val cacheManager = sparkSession.sharedState.cacheManager
+    cacheManager.directTableRelation(relation).getOrElse(EliminateSubqueryAliases(relation)) match {
       case r @ ExtractV2CatalogAndIdentifier(catalog, ident) if r.timeTravelSpec.isEmpty =>
         val nameParts = ident.toQualifiedNameParts(catalog)
-        sparkSession.sharedState.cacheManager.recacheTableOrView(sparkSession, nameParts)
+        cacheManager.recacheTableOrView(sparkSession, nameParts)
+      case LogicalRelationWithTable(baseRelation, catalogTable) =>
+        catalogTable match {
+          case Some(table) =>
+            cacheManager.recacheTableOrView(sparkSession, table.identifier.nameParts)
+          case None =>
+            cacheManager.recacheByV1Relation(sparkSession, baseRelation)
+        }
+      case HiveTableRelation(catalogTable, _, _, _, _, _) =>
+        cacheManager.recacheTableOrView(
+          sparkSession, catalogTable.identifier.nameParts)
       case _ =>
-        sparkSession.sharedState.cacheManager.recacheByPlan(sparkSession, relation)
+        cacheManager.recacheByPlan(sparkSession, relation)
     }
   }
 

@@ -49,7 +49,9 @@ import org.apache.spark.util.ArrayImplicits._
  * @param readDataSchema Required data schema in the batch scan.
  * @param partitionSchema Schema of partitions.
  * @param options Options for parsing ORC files.
- * @param charVarcharStandardSemantics CHAR/VARCHAR semantics bound during analysis.
+ * @param charVarcharStandardSemantics Whether analysis bound this scan to Spark-standard
+ *                                     CHAR/VARCHAR semantics. When false, ORC uses native
+ *                                     constrained types.
  */
 case class OrcPartitionReaderFactory(
     sqlConf: SQLConf,

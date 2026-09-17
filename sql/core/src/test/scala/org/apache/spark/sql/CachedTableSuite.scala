@@ -36,7 +36,7 @@ import org.apache.spark.sql.catalyst.analysis.AsOfVersion
 import org.apache.spark.sql.catalyst.analysis.TempTableAlreadyExistsException
 import org.apache.spark.sql.catalyst.expressions.SubqueryExpression
 import org.apache.spark.sql.catalyst.plans.logical.{BROADCAST, Join, JoinStrategyHint, SHUFFLE_HASH}
-import org.apache.spark.sql.catalyst.util.DateTimeConstants
+import org.apache.spark.sql.catalyst.util.{CharVarcharScanMode, DateTimeConstants}
 import org.apache.spark.sql.connector.catalog.BasicInMemoryTableCatalog
 import org.apache.spark.sql.connector.catalog.CatalogPlugin
 import org.apache.spark.sql.connector.catalog.CatalogV2Implicits.CatalogHelper
@@ -44,10 +44,11 @@ import org.apache.spark.sql.connector.catalog.Identifier
 import org.apache.spark.sql.connector.catalog.InMemoryCatalog
 import org.apache.spark.sql.connector.catalog.TableWritePrivilege
 import org.apache.spark.sql.connector.catalog.TruncatableTable
-import org.apache.spark.sql.execution.{ColumnarToRowExec, ExecSubqueryExpression, RDDScanExec, SparkPlan, SparkPlanInfo}
+import org.apache.spark.sql.execution.{CachedData, ColumnarToRowExec, ExecSubqueryExpression, RDDScanExec, SparkPlan, SparkPlanInfo}
 import org.apache.spark.sql.execution.adaptive.{AdaptiveSparkPlanHelper, AQEPropagateEmptyRelation}
 import org.apache.spark.sql.execution.columnar._
 import org.apache.spark.sql.execution.command.CommandUtils
+import org.apache.spark.sql.execution.datasources.LogicalRelation
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeExec
 import org.apache.spark.sql.execution.ui.SparkListenerSQLAdaptiveExecutionUpdate
@@ -57,7 +58,7 @@ import org.apache.spark.sql.test.SharedSparkSession
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.sql.util.PartitionKeyedAccumulator
 import org.apache.spark.storage.{RDDBlockId, StorageLevel}
-import org.apache.spark.storage.StorageLevel.{MEMORY_AND_DISK_2, MEMORY_ONLY}
+import org.apache.spark.storage.StorageLevel.{DISK_ONLY, MEMORY_AND_DISK_2, MEMORY_ONLY}
 import org.apache.spark.tags.SlowSQLTest
 import org.apache.spark.unsafe.types.CalendarInterval
 import org.apache.spark.util.{AccumulatorContext, Utils}
@@ -2353,8 +2354,18 @@ class CachedTableSuite extends SharedSparkSession
     val ident = Identifier.of(Array(), "tbl")
     val version1 = "v1"
     val version2 = "v2"
+    val boundModes = Seq(
+      (Seq(
+        SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO.key -> "false",
+        SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "false"),
+        MEMORY_AND_DISK_2),
+      (Seq(
+        SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO.key -> "true",
+        SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "false"),
+        MEMORY_ONLY),
+      (Seq(SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "true"), DISK_ONLY))
     withTable(t, tRenamed, "cached_tt1", "cached_tt2") {
-      sql(s"CREATE TABLE $t (id int, data string) USING foo")
+      sql(s"CREATE TABLE $t (id int, data CHAR(4)) USING foo")
       sql(s"INSERT INTO $t VALUES (1, 'a'), (2, 'b')")
 
       // pin v1
@@ -2367,23 +2378,142 @@ class CachedTableSuite extends SharedSparkSession
 
       sql(s"INSERT INTO $t VALUES (4, 'e'), (5, 'f')")
 
-      // cache base and both versions
-      sql(s"CACHE TABLE $t")
-      assertCached(sql(s"SELECT * FROM $t"))
+      // Cache all mode-specific variants of the base table and both versions.
+      boundModes.foreach { case (modeConf, storageLevel) =>
+        withSQLConf(modeConf: _*) {
+          spark.table(t).persist(storageLevel)
+          spark.table(t).count()
+        }
+      }
       sql(s"CACHE TABLE cached_tt1 AS SELECT * FROM $t VERSION AS OF '$version1'")
       assertCached(sql(s"SELECT * FROM $t VERSION AS OF '$version1'"))
       sql(s"CACHE TABLE cached_tt2 AS SELECT * FROM $t VERSION AS OF '$version2'")
       assertCached(sql(s"SELECT * FROM $t VERSION AS OF '$version2'"))
 
-      // must have 3 cache entries
-      assert(cacheManager.numCachedEntries == 3)
+      assert(cacheManager.numCachedEntries == 5)
 
       // rename base table
       sql(s"ALTER TABLE $t RENAME TO tbl_renamed")
 
-      // assert cache was cleared and renamed table (current version) was cached again
-      assert(cacheManager.numCachedEntries == 1)
-      assertCached(sql(s"SELECT * FROM $tRenamed"))
+      // Time-travel caches are invalidated; all direct mode variants are restored.
+      assert(cacheManager.numCachedEntries == 3)
+      boundModes.foreach { case (modeConf, _) =>
+        withSQLConf(modeConf: _*) {
+          assertCached(sql(s"SELECT * FROM $tRenamed"))
+        }
+      }
+      val restoredDescriptors = cacheManager
+        .lookupCachedDataByTableName(
+          Seq("testcat", "tbl_renamed"),
+          spark.sessionState.conf.resolver)
+        .map { cached =>
+          val mode = cached.plan.collectFirst {
+            case relation: DataSourceV2Relation => relation.charVarcharScanMode
+          }.flatten
+          mode -> cached.cachedRepresentation.cacheBuilder.storageLevel
+        }.toMap
+      assert(restoredDescriptors === Map(
+        Some(CharVarcharScanMode.Legacy) -> MEMORY_AND_DISK_2,
+        Some(CharVarcharScanMode.PreserveNative) -> MEMORY_ONLY,
+        Some(CharVarcharScanMode.SparkStandard) -> DISK_ONLY))
+    }
+  }
+
+  test("catalog V2 recache preserves all bound CHAR/VARCHAR scan modes") {
+    val tableName = "testcat.tbl"
+    val preserveConf = Seq(
+      SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO.key -> "true",
+      SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "false")
+    val standardConf = Seq(SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "true")
+
+    withTable(tableName) {
+      sql(s"CREATE TABLE $tableName (id int, data CHAR(4)) USING foo")
+      sql(s"INSERT INTO $tableName VALUES (1, 'a')")
+
+      def cachedData(modeConf: Seq[(String, String)]): CachedData = {
+        withSQLConf(modeConf: _*) {
+          cacheManager.lookupCachedData(sql(s"SELECT * FROM $tableName")).get
+        }
+      }
+
+      withSQLConf(preserveConf: _*) {
+        spark.table(tableName).persist(MEMORY_ONLY)
+        spark.table(tableName).count()
+      }
+      withSQLConf(standardConf: _*) {
+        spark.table(tableName).persist(DISK_ONLY)
+        spark.table(tableName).count()
+      }
+      withSQLConf(preserveConf: _*) {
+        sql(s"INSERT INTO $tableName VALUES (2, 'b')")
+      }
+
+      Seq(preserveConf, standardConf).foreach { modeConf =>
+        withSQLConf(modeConf: _*) {
+          checkAnswer(
+            sql(s"SELECT * FROM $tableName"),
+            Seq(Row(1, "a   "), Row(2, "b   ")))
+        }
+      }
+      assert(cachedData(preserveConf).cachedRepresentation.cacheBuilder.storageLevel ===
+        MEMORY_ONLY)
+      assert(cachedData(standardConf).cachedRepresentation.cacheBuilder.storageLevel ===
+        DISK_ONLY)
+    }
+  }
+
+  test("refreshTable recaches all bound CHAR/VARCHAR V1 scan modes") {
+    val legacyConf = Seq(
+      SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO.key -> "false",
+      SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "false")
+    val preserveConf = Seq(
+      SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO.key -> "true",
+      SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "false")
+    val standardConf = Seq(SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "true")
+
+    withTable("cached_cv") {
+      sql("CREATE TABLE cached_cv (id int, data CHAR(4)) USING parquet")
+      sql("INSERT INTO cached_cv VALUES (1, 'a')")
+
+      def cachedData(modeConf: Seq[(String, String)]): CachedData = {
+        withSQLConf(modeConf: _*) {
+          cacheManager.lookupCachedData(sql("SELECT * FROM cached_cv")).get
+        }
+      }
+
+      Seq(
+        (legacyConf, MEMORY_AND_DISK_2),
+        (preserveConf, MEMORY_ONLY),
+        (standardConf, DISK_ONLY)).foreach { case (modeConf, storageLevel) =>
+        withSQLConf(modeConf: _*) {
+          spark.table("cached_cv").persist(storageLevel)
+          spark.table("cached_cv").count()
+        }
+      }
+
+      withSQLConf(preserveConf: _*) {
+        spark.catalog.refreshTable("cached_cv")
+      }
+
+      val expectedModes = Seq(
+        legacyConf -> CharVarcharScanMode.Legacy,
+        preserveConf -> CharVarcharScanMode.PreserveNative,
+        standardConf -> CharVarcharScanMode.SparkStandard)
+      expectedModes.foreach { case (modeConf, expectedMode) =>
+        val mode = cachedData(modeConf).plan.collectFirst {
+          case relation: LogicalRelation => relation.charVarcharScanMode
+        }.flatten
+        assert(mode.contains(expectedMode))
+        withSQLConf(modeConf: _*) {
+          checkAnswer(sql("SELECT * FROM cached_cv"), Row(1, "a   "))
+        }
+      }
+      assert(cachedData(legacyConf).cachedRepresentation.cacheBuilder.storageLevel ===
+        MEMORY_AND_DISK_2)
+      assert(cachedData(preserveConf).cachedRepresentation.cacheBuilder.storageLevel ===
+        MEMORY_ONLY)
+      assert(cachedData(standardConf).cachedRepresentation.cacheBuilder.storageLevel ===
+        DISK_ONLY)
     }
   }
 

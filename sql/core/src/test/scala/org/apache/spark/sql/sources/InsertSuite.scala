@@ -28,12 +28,15 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.catalog.{CatalogStorageFormat, CatalogTable, CatalogTableType}
 import org.apache.spark.sql.catalyst.parser.ParseException
+import org.apache.spark.sql.catalyst.util.CharVarcharScanMode
 import org.apache.spark.sql.connector.{FakeV2Provider, FakeV2ProviderWithCustomSchema}
-import org.apache.spark.sql.execution.datasources.DataSourceUtils
+import org.apache.spark.sql.execution.CachedData
+import org.apache.spark.sql.execution.datasources.{DataSourceUtils, LogicalRelation}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.internal.SQLConf.PartitionOverwriteMode
 import org.apache.spark.sql.test.SharedSparkSession
 import org.apache.spark.sql.types._
+import org.apache.spark.storage.StorageLevel.{DISK_ONLY, MEMORY_ONLY}
 import org.apache.spark.tags.ExtendedSQLTest
 import org.apache.spark.util.Utils
 
@@ -397,6 +400,66 @@ class InsertSuite extends DataSourceTest with SharedSparkSession {
     // Verify uncaching
     spark.catalog.uncacheTable("jsonTable")
     assertCached(sql("SELECT * FROM jsonTable"), 0)
+  }
+
+  test("SPARK-58814: insert recaches both bound CHAR/VARCHAR scan modes") {
+    val tableName = "json_char_table"
+    val preserveConf = Seq(
+      SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO.key -> "true",
+      SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "false")
+    val standardConf = Seq(SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "true")
+
+    def cachedData(modeConf: Seq[(String, String)]): CachedData = {
+      withSQLConf(modeConf: _*) {
+        spark.sharedState.cacheManager.lookupCachedData(sql(s"SELECT * FROM $tableName")).get
+      }
+    }
+
+    withTempPath { tablePath =>
+      withTable(tableName) {
+        sql(
+          s"""CREATE TABLE $tableName (a INT, b CHAR(8))
+             |USING json LOCATION '${tablePath.toURI}'""".stripMargin)
+        sql(s"INSERT OVERWRITE TABLE $tableName SELECT a, b FROM jt")
+        try {
+          withSQLConf(preserveConf: _*) {
+            spark.table(tableName).persist(MEMORY_ONLY)
+            spark.table(tableName).count()
+          }
+          withSQLConf(standardConf: _*) {
+            spark.table(tableName).persist(DISK_ONLY)
+            spark.table(tableName).count()
+          }
+
+          withSQLConf(preserveConf: _*) {
+            sql(s"INSERT OVERWRITE TABLE $tableName SELECT a * 2, b FROM jt")
+          }
+
+          Seq(preserveConf, standardConf).foreach { modeConf =>
+            withSQLConf(modeConf: _*) {
+              assertCached(spark.table(tableName))
+              checkAnswer(
+                spark.table(tableName),
+                (1 to 10).map(i => Row(i * 2, s"str$i".padTo(8, ' ').mkString)))
+            }
+          }
+          val modes = Seq(preserveConf, standardConf).map { modeConf =>
+            cachedData(modeConf).plan.collectFirst {
+              case relation: LogicalRelation => relation.charVarcharScanMode
+            }.flatten
+          }
+          assert(modes === Seq(
+            Some(CharVarcharScanMode.PreserveNative),
+            Some(CharVarcharScanMode.SparkStandard)))
+          assert(cachedData(preserveConf).cachedRepresentation.cacheBuilder.storageLevel ===
+            MEMORY_ONLY)
+          assert(cachedData(standardConf).cachedRepresentation.cacheBuilder.storageLevel ===
+            DISK_ONLY)
+        } finally {
+          spark.catalog.clearCache()
+        }
+      }
+    }
   }
 
   test("it's not allowed to insert into a relation that is not an InsertableRelation") {

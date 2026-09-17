@@ -36,14 +36,14 @@ import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.DescribeCommandSchema
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.types.DataTypeUtils
-import org.apache.spark.sql.catalyst.util.{escapeSingleQuotedString, quoteIfNeeded, CaseInsensitiveMap, CharVarcharUtils, DateTimeUtils, ResolveDefaultColumns}
+import org.apache.spark.sql.catalyst.util.{escapeSingleQuotedString, quoteIfNeeded, CaseInsensitiveMap, CharVarcharScanMode, CharVarcharUtils, DateTimeUtils, ResolveDefaultColumns}
 import org.apache.spark.sql.catalyst.util.ResolveDefaultColumns.CURRENT_DEFAULT_COLUMN_METADATA_KEY
 import org.apache.spark.sql.classic.ClassicConversions.castToImpl
 import org.apache.spark.sql.connector.catalog.{TableCatalog, V1Table, V1View}
 import org.apache.spark.sql.connector.catalog.CatalogV2Implicits.TableIdentifierHelper
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
 import org.apache.spark.sql.execution.CommandExecutionMode
-import org.apache.spark.sql.execution.datasources.DataSource
+import org.apache.spark.sql.execution.datasources.{DataSource, LogicalRelation}
 import org.apache.spark.sql.execution.datasources.csv.CSVFileFormat
 import org.apache.spark.sql.execution.datasources.json.JsonFileFormat
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat
@@ -202,19 +202,40 @@ case class AlterTableRenameCommand(
     } else {
       val table = catalog.getTableMetadata(oldName)
       DDLUtils.verifyAlterTableType(catalog, table, isView)
-      // If `optStorageLevel` is defined, the old table was cached.
-      val optCachedData = sparkSession.sharedState.cacheManager.lookupCachedData(
-        sparkSession.table(oldName.unquotedString))
-      val optStorageLevel = optCachedData.map(_.cachedRepresentation.cacheBuilder.storageLevel)
-      if (optStorageLevel.isDefined) {
+      val cacheManager = sparkSession.sharedState.cacheManager
+      val cacheDescriptors = cacheManager
+        .lookupCachedDataByTableName(oldName.nameParts, sparkSession.sessionState.conf.resolver)
+        .map { cached =>
+          val mode = cached.plan.collectFirst {
+            case relation: LogicalRelation => relation.charVarcharScanMode
+            case relation: HiveTableRelation => relation.charVarcharScanMode
+          }.flatten
+          (cached.cachedRepresentation.cacheBuilder.storageLevel, mode)
+        }
+      if (cacheDescriptors.nonEmpty) {
         CommandUtils.uncacheTableOrView(sparkSession, oldName)
       }
       // Invalidate the table last, otherwise uncaching the table would load the logical plan
       // back into the hive metastore cache
       catalog.refreshTable(oldName)
       catalog.renameTable(oldName, newName)
-      optStorageLevel.foreach { storageLevel =>
-        sparkSession.catalog.cacheTable(newName.unquotedString, storageLevel)
+      cacheDescriptors.foreach { case (storageLevel, mode) =>
+        val cacheSession = sparkSession.newSession()
+        mode.foreach {
+          case CharVarcharScanMode.Legacy =>
+            cacheSession.conf.set(SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO.key, false)
+            cacheSession.conf.set(SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key, false)
+          case CharVarcharScanMode.PreserveNative =>
+            cacheSession.conf.set(SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO.key, true)
+            cacheSession.conf.set(SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key, false)
+          case CharVarcharScanMode.SparkStandard =>
+            cacheSession.conf.set(SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key, true)
+        }
+        val renamedTable = cacheSession.table(newName.unquotedString)
+        cacheManager.cacheQuery(
+          renamedTable,
+          Some(newName.unquotedString),
+          storageLevel)
       }
     }
     Seq.empty[Row]

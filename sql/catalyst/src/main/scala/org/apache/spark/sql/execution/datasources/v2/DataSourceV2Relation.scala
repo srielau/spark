@@ -29,7 +29,12 @@ import org.apache.spark.sql.catalyst.plans.logical.statsEstimation.EstimationUti
 import org.apache.spark.sql.catalyst.streaming.{StreamingSourceIdentifyingName, Unassigned}
 import org.apache.spark.sql.catalyst.trees.TreePattern.{DATA_SOURCE_V2_RELATION, DATA_SOURCE_V2_SCAN_RELATION, TreePattern}
 import org.apache.spark.sql.catalyst.types.DataTypeUtils.toAttributes
-import org.apache.spark.sql.catalyst.util.{removeInternalMetadata, truncatedString, CharVarcharUtils}
+import org.apache.spark.sql.catalyst.util.{
+  removeInternalMetadata,
+  truncatedString,
+  CharVarcharScanMode,
+  CharVarcharUtils
+}
 import org.apache.spark.sql.connector.catalog.{CatalogPlugin, FunctionCatalog, Identifier, SupportsMetadataColumns, Table, TableCapability, TableCatalog, V2TableUtil}
 import org.apache.spark.sql.connector.catalog.CatalogV2Implicits.CatalogHelper
 import org.apache.spark.sql.connector.expressions.{FieldReference, NamedReference}
@@ -116,9 +121,9 @@ case class DataSourceV2Relation(
     identifier: Option[Identifier],
     options: CaseInsensitiveStringMap,
     timeTravelSpec: Option[TimeTravelSpec] = None,
-    // Bound at analysis so sameResult / cache reuse distinguish preserve-only vs standard
-    // CHAR/VARCHAR scans. None means the relation was not analyzed under first-class types.
-    charVarcharStandardSemantics: Option[Boolean] = None)
+    // Bound at analysis for raw CHAR/VARCHAR schemas so sameResult / cache reuse distinguish
+    // legacy, preserve-native, and standard scans. None means the relation is unbound.
+    charVarcharScanMode: Option[CharVarcharScanMode] = None)
   extends DataSourceV2RelationBase(table, output, catalog, identifier, options, timeTravelSpec)
   with ExposesMetadataColumns {
 

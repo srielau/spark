@@ -18,7 +18,13 @@
 package org.apache.spark.sql.execution.command
 
 import org.apache.spark.sql.{AnalysisException, QueryTest, Row}
+import org.apache.spark.sql.catalyst.catalog.HiveTableRelation
+import org.apache.spark.sql.catalyst.util.CharVarcharScanMode
+import org.apache.spark.sql.execution.datasources.LogicalRelation
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.storage.StorageLevel
+import org.apache.spark.storage.StorageLevel.{DISK_ONLY, MEMORY_AND_DISK_2, MEMORY_ONLY}
 
 /**
  * This base suite contains unified tests for the `ALTER TABLE .. RENAME` command that check V1
@@ -44,6 +50,69 @@ trait AlterTableRenameSuiteBase extends QueryTest with DDLCommandTestUtils {
       sql(s"ALTER TABLE $src RENAME TO ns.dst_tbl")
       checkTables("ns", "dst_tbl")
       QueryTest.checkAnswer(sql(s"SELECT c0 FROM $dst"), Seq(Row(0)))
+    }
+  }
+
+  test("rename preserves direct CHAR/VARCHAR cache variants only") {
+    withNamespaceAndTable("ns", "dst_char_tbl") { dst =>
+      val src = dst.replace("dst", "src")
+      val dependent = "cached_char_projection"
+      val legacyConf = Seq(
+        SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO.key -> "false",
+        SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "false")
+      val preserveConf = Seq(
+        SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO.key -> "true",
+        SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "false")
+      val standardConf = Seq(SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "true")
+      val cacheManager = spark.sharedState.cacheManager
+
+      withTable(dependent) {
+        sql(s"CREATE TABLE $src (id INT, value CHAR(4)) $defaultUsing")
+        sql(s"INSERT INTO $src VALUES (1, 'ab')")
+        withSQLConf(legacyConf: _*) {
+          spark.table(src).persist(MEMORY_AND_DISK_2)
+          spark.table(src).count()
+        }
+        withSQLConf(preserveConf: _*) {
+          spark.table(src).persist(MEMORY_ONLY)
+          spark.table(src).count()
+        }
+        withSQLConf(standardConf: _*) {
+          spark.table(src).persist(DISK_ONLY)
+          spark.table(src).count()
+        }
+        withSQLConf(preserveConf: _*) {
+          sql(s"CACHE TABLE $dependent AS SELECT id FROM $src")
+        }
+
+        withSQLConf(preserveConf: _*) {
+          sql(s"ALTER TABLE $src RENAME TO ns.dst_char_tbl")
+        }
+
+        assert(cacheManager.numCachedEntries === 3)
+        Seq(preserveConf, standardConf).foreach { modeConf =>
+          withSQLConf(modeConf: _*) {
+            checkAnswer(spark.table(dst), Row(1, "ab  "))
+          }
+        }
+        val resolver = spark.sessionState.conf.resolver
+        val directCaches = (
+          cacheManager.lookupCachedDataByTableName(Seq("ns", "dst_char_tbl"), resolver) ++
+            cacheManager.lookupCachedDataByTableName(
+              Seq(catalog, "ns", "dst_char_tbl"), resolver)).distinct
+        val restoredDescriptors = directCaches.map { cached =>
+          val mode = cached.plan.collectFirst {
+            case relation: LogicalRelation => relation.charVarcharScanMode
+            case relation: DataSourceV2Relation => relation.charVarcharScanMode
+            case relation: HiveTableRelation => relation.charVarcharScanMode
+          }.flatten
+          mode -> cached.cachedRepresentation.cacheBuilder.storageLevel
+        }.toMap
+        assert(restoredDescriptors === Map(
+          Some(CharVarcharScanMode.Legacy) -> MEMORY_AND_DISK_2,
+          Some(CharVarcharScanMode.PreserveNative) -> MEMORY_ONLY,
+          Some(CharVarcharScanMode.SparkStandard) -> DISK_ONLY))
+      }
     }
   }
 

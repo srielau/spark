@@ -20,12 +20,16 @@ package org.apache.spark.sql.hive
 import java.io.File
 
 import org.apache.spark.sql.{AnalysisException, QueryTest, Row, SaveMode}
+import org.apache.spark.sql.catalyst.catalog.HiveTableRelation
 import org.apache.spark.sql.catalyst.parser.ParseException
+import org.apache.spark.sql.catalyst.util.CharVarcharScanMode
 import org.apache.spark.sql.classic.Dataset
+import org.apache.spark.sql.execution.CachedData
 import org.apache.spark.sql.execution.columnar.InMemoryTableScanExec
 import org.apache.spark.sql.execution.datasources.{CatalogFileIndex, HadoopFsRelation, LogicalRelation}
 import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat
 import org.apache.spark.sql.hive.test.TestHiveSingleton
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.storage.RDDBlockId
 import org.apache.spark.storage.StorageLevel.{DISK_ONLY, MEMORY_ONLY}
@@ -34,6 +38,7 @@ import org.apache.spark.util.Utils
 
 class CachedTableSuite extends QueryTest with TestHiveSingleton {
   import hiveContext._
+  import testImplicits._
 
   def rddIdOf(tableName: String): Int = {
     val plan = table(tableName).queryExecution.sparkPlan
@@ -49,6 +54,64 @@ class CachedTableSuite extends QueryTest with TestHiveSingleton {
     val maybeBlock = sparkContext.env.blockManager.get(RDDBlockId(rddId, 0))
     maybeBlock.foreach(_ => sparkContext.env.blockManager.releaseLock(RDDBlockId(rddId, 0)))
     maybeBlock.nonEmpty
+  }
+
+  test("SPARK-58814: refresh preserves simultaneous direct Hive CHAR/VARCHAR caches") {
+    val tableName = "hive_char_refresh"
+    val preserveConf = Seq(
+      SQLConf.PRESERVE_CHAR_VARCHAR_TYPE_INFO.key -> "true",
+      SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "false")
+    val standardConf = Seq(SQLConf.CHAR_VARCHAR_STANDARD_SEMANTICS.key -> "true")
+    val cacheManager = spark.sharedState.cacheManager
+
+    def cachedData(modeConf: Seq[(String, String)]): CachedData = {
+      withSQLConf(modeConf: _*) {
+        cacheManager.lookupCachedData(table(tableName)).get
+      }
+    }
+
+    withTempPath { path =>
+      Seq("ab").toDF("v").write.orc(path.getCanonicalPath)
+      withTable(tableName) {
+        sql(
+          s"""CREATE EXTERNAL TABLE $tableName (v CHAR(4))
+             |STORED AS ORC LOCATION '${path.toURI}'""".stripMargin)
+        withSQLConf(HiveUtils.CONVERT_METASTORE_ORC.key -> "false") {
+          try {
+            withSQLConf(preserveConf: _*) {
+              table(tableName).persist(MEMORY_ONLY)
+              table(tableName).count()
+            }
+            withSQLConf(standardConf: _*) {
+              table(tableName).persist(DISK_ONLY)
+              table(tableName).count()
+            }
+
+            spark.catalog.refreshTable(tableName)
+
+            Seq(preserveConf, standardConf).foreach { modeConf =>
+              withSQLConf(modeConf: _*) {
+                checkAnswer(table(tableName), Row("ab  "))
+              }
+            }
+            val modes = Seq(preserveConf, standardConf).map { modeConf =>
+              cachedData(modeConf).plan.collectFirst {
+                case relation: HiveTableRelation => relation.charVarcharScanMode
+              }.flatten
+            }
+            assert(modes === Seq(
+              Some(CharVarcharScanMode.PreserveNative),
+              Some(CharVarcharScanMode.SparkStandard)))
+            assert(cachedData(preserveConf).cachedRepresentation.cacheBuilder.storageLevel ===
+              MEMORY_ONLY)
+            assert(cachedData(standardConf).cachedRepresentation.cacheBuilder.storageLevel ===
+              DISK_ONLY)
+          } finally {
+            spark.catalog.clearCache()
+          }
+        }
+      }
+    }
   }
 
   test("cache table") {

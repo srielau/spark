@@ -31,7 +31,7 @@ import org.apache.spark.sql.catalyst.parser.{CatalystSqlParser, ParseException}
 import org.apache.spark.sql.catalyst.plans.logical.{
   Aggregate, Filter, LogicalPlan, OneRowRelation, Project
 }
-import org.apache.spark.sql.catalyst.util.CharVarcharUtils
+import org.apache.spark.sql.catalyst.util.{CharVarcharScanMode, CharVarcharUtils}
 import org.apache.spark.sql.classic.Dataset
 import org.apache.spark.sql.connector.SchemaRequiredDataSource
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, InMemoryPartitionTableCatalog}
@@ -2396,6 +2396,23 @@ class BasicCharVarcharTestSuite extends SharedSparkSession {
         checkAnswer(df1, df.select("v", "c"))
         assert(df1.schema.last.dataType === StringType)
       }
+    }
+  }
+
+  test("SPARK-58814: scan modes bind only raw CHAR/VARCHAR relations") {
+    def scanMode(tableName: String): Option[CharVarcharScanMode] = {
+      spark.table(tableName).queryExecution.analyzed.collectFirst {
+        case relation: LogicalRelation => relation.charVarcharScanMode
+        case relation: DataSourceV2Relation => relation.charVarcharScanMode
+      }.flatten
+    }
+
+    withTable("legacy_char_mode", "plain_string_mode") {
+      sql("CREATE TABLE legacy_char_mode (v CHAR(4)) USING parquet")
+      sql("CREATE TABLE plain_string_mode (v STRING) USING parquet")
+
+      assert(scanMode("legacy_char_mode").contains(CharVarcharScanMode.Legacy))
+      assert(scanMode("plain_string_mode").isEmpty)
     }
   }
 }
